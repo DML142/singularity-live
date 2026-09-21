@@ -1,0 +1,25 @@
+[package]
+name = "singularity-live"
+version = "0.1.0"
+description = "Desktop context copilot"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[lib]
+name = "singularity_live"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+tauri = { version = "2.11.6", features = [] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
