@@ -137,9 +137,11 @@ Frontend code may request a defined action; Rust authorizes and executes it. Com
 be narrow and typed—never a generic action dispatcher, filesystem gateway, shell wrapper,
 HTTP proxy, or SQL endpoint.
 
-Tauri capabilities begin with no plugin permissions. Permissions are added only with an
-implemented feature and reviewed for least privilege. Provider keys must never enter Vite
-environment variables, localStorage, Zustand, logs, or IPC responses. A future
+Tauri capabilities grant only application commands declared in the Rust build manifest;
+the main window currently receives only `allow-get-app-status` and no plugin permissions.
+Permissions are added only with an implemented feature and reviewed for least privilege.
+Provider keys must never enter Vite environment variables, localStorage, Zustand, logs, or
+IPC responses. A future
 `SecretStore` port will use an OS-backed credential facility selected during Phase 1/6.
 
 Sensitive content is excluded from logs by default. API keys, authorization headers, raw
@@ -445,7 +447,8 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 - Accessible dark desktop shell for session, transcript, and assistant empty states.
 - Typed `get_app_status` frontend client and narrow Tauri command.
 - Rust application-status service and meaningful unit test.
-- Empty Tauri plugin capability set and explicit content security policy.
+- Explicit permission for the status command, no Tauri plugin permissions, and a production
+  content security policy without `unsafe-inline`.
 - Frontend behavior test, formatting, lint, type checking, build scripts, and CI.
 - Rust formatting, Clippy, test, and check scripts.
 - Public README, this engineering guide, and focused ADRs.

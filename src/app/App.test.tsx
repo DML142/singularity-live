@@ -33,4 +33,24 @@ describe("application shell", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
   });
+
+  it("reports an unavailable backend when IPC returns a malformed payload", async () => {
+    invokeMock.mockResolvedValue({});
+
+    render(<App />);
+
+    expect(await screen.findByText("Backend unavailable")).toBeInTheDocument();
+  });
+
+  it("does not report readiness when the backend state is not ready", async () => {
+    invokeMock.mockResolvedValue({
+      applicationName: "Singularity Live",
+      version: "0.1.0",
+      backendState: "starting",
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Backend unavailable")).toBeInTheDocument();
+  });
 });

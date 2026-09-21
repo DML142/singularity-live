@@ -16,7 +16,8 @@ credentials, persistence, capture, or unrestricted host access.
 Use Tauri 2 with a React and TypeScript webview. React owns presentation and local UI
 interaction. Rust owns operating-system integration, secrets, provider networking,
 persistence, capture, and session orchestration. Communication crosses narrowly scoped,
-typed Tauri commands. Capabilities begin empty and are expanded only for implemented work.
+typed Tauri commands. Capabilities grant only explicitly declared application commands and
+are expanded only for implemented work.
 
 ## Consequences
 
