@@ -1,5 +1,8 @@
 pub mod app;
 mod commands;
+pub mod config;
+pub mod domain;
+pub mod secrets;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the Singularity Live desktop runtime.
