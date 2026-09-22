@@ -17,8 +17,13 @@ use crate::{
 const MAX_MANUAL_TEXT_BYTES: usize = 16 * 1024;
 
 pub struct ManualAssistanceService {
-    runtime: ConfiguredRuntime,
+    runtime: ManualAssistanceRuntime,
     active: Mutex<Option<ActiveRequest>>,
+}
+
+enum ManualAssistanceRuntime {
+    Configured(ConfiguredRuntime),
+    Unconfigured { message: String },
 }
 
 struct ConfiguredRuntime {
@@ -40,34 +45,50 @@ impl ManualAssistanceService {
         router: Arc<dyn TextGenerationRouter>,
     ) -> Self {
         Self {
-            runtime: ConfiguredRuntime {
+            runtime: ManualAssistanceRuntime::Configured(ConfiguredRuntime {
                 context_pack_directory,
                 context_pack_id,
                 router,
-            },
+            }),
+            active: Mutex::new(None),
+        }
+    }
+
+    #[must_use]
+    pub fn unconfigured(message: String) -> Self {
+        Self {
+            runtime: ManualAssistanceRuntime::Unconfigured { message },
             active: Mutex::new(None),
         }
     }
 
     #[must_use]
     pub fn readiness(&self) -> ManualAssistanceReadiness {
-        if let Err(error) = self.runtime.router.check_readiness() {
+        let runtime = match &self.runtime {
+            ManualAssistanceRuntime::Configured(runtime) => runtime,
+            ManualAssistanceRuntime::Unconfigured { message } => {
+                return ManualAssistanceReadiness::Unconfigured {
+                    message: message.clone(),
+                };
+            }
+        };
+        if let Err(error) = runtime.router.check_readiness() {
             return ManualAssistanceReadiness::Unconfigured {
                 message: error.message,
             };
         }
-        if let Err(error) = ContextPackLoader::load(&self.runtime.context_pack_directory) {
+        if let Err(error) = ContextPackLoader::load(&runtime.context_pack_directory) {
             return ManualAssistanceReadiness::Unconfigured {
                 message: format!(
                     "Context pack {} is unavailable: {error}",
-                    self.runtime.context_pack_id
+                    runtime.context_pack_id
                 ),
             };
         }
         ManualAssistanceReadiness::Ready {
-            provider: self.runtime.router.provider(),
-            model: self.runtime.router.model().clone(),
-            context_pack: self.runtime.context_pack_id.clone(),
+            provider: runtime.router.provider(),
+            model: runtime.router.model().clone(),
+            context_pack: runtime.context_pack_id.clone(),
         }
     }
 
@@ -83,17 +104,26 @@ impl ManualAssistanceService {
         sink: Arc<dyn StreamSink>,
     ) -> Result<RequestId, ManualAssistanceError> {
         let text = validate_input(&text)?;
-        self.runtime.router.check_readiness().map_err(|error| {
-            ManualAssistanceError::NotConfigured {
-                message: error.message,
+        let runtime = match &self.runtime {
+            ManualAssistanceRuntime::Configured(runtime) => runtime,
+            ManualAssistanceRuntime::Unconfigured { message } => {
+                return Err(ManualAssistanceError::NotConfigured {
+                    message: message.clone(),
+                });
             }
-        })?;
+        };
+        runtime
+            .router
+            .check_readiness()
+            .map_err(|error| ManualAssistanceError::NotConfigured {
+                message: error.message,
+            })?;
 
         let request_id = RequestId::new();
         let cancellation = CancellationToken::new();
         self.reserve(request_id, cancellation.clone())?;
 
-        let pack_path = self.runtime.context_pack_directory.clone();
+        let pack_path = runtime.context_pack_directory.clone();
         let selection_text = text.clone();
         let context_result = tokio::task::spawn_blocking(move || {
             let pack = ContextPackLoader::load(&pack_path)?;
@@ -116,10 +146,11 @@ impl ManualAssistanceService {
             }
         };
         let system_prompt = build_system_prompt(&selected_context);
+        let router = Arc::clone(&runtime.router);
         let request = TextGenerationRequest {
             request_id,
-            provider: self.runtime.router.provider(),
-            model: self.runtime.router.model().clone(),
+            provider: router.provider(),
+            model: router.model().clone(),
             selected_context,
             system_prompt,
             user_text: text,
@@ -131,11 +162,7 @@ impl ManualAssistanceService {
 
         let service = Arc::clone(self);
         tokio::spawn(async move {
-            let result = service
-                .runtime
-                .router
-                .stream(&request, cancellation, sink.as_ref())
-                .await;
+            let result = router.stream(&request, cancellation, sink.as_ref()).await;
             let terminal_event = match result {
                 Ok(completed) => StreamEvent::Completed(completed),
                 Err(error) if error.kind == ProviderErrorKind::Cancellation => {

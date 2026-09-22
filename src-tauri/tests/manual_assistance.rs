@@ -210,6 +210,27 @@ fn readiness_reports_configuration_and_context_failures_safely() {
 }
 
 #[tokio::test]
+async fn unconfigured_service_starts_safely_and_rejects_requests() {
+    let service = Arc::new(ManualAssistanceService::unconfigured(
+        "Required setting SINGULARITY_LIVE_PROVIDER is not configured".to_owned(),
+    ));
+    let (sink, _) = channel_sink();
+
+    assert_eq!(
+        service.readiness(),
+        ManualAssistanceReadiness::Unconfigured {
+            message: "Required setting SINGULARITY_LIVE_PROVIDER is not configured".to_owned(),
+        }
+    );
+    assert_eq!(
+        service.start("Hello".to_owned(), sink).await,
+        Err(ManualAssistanceError::NotConfigured {
+            message: "Required setting SINGULARITY_LIVE_PROVIDER is not configured".to_owned(),
+        })
+    );
+}
+
+#[tokio::test]
 async fn validates_manual_text_before_starting() {
     let pack = PackFixture::new();
     let service = service(&pack, Arc::new(FakeRouter::new(RouterBehavior::Success)));

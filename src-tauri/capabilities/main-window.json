@@ -3,5 +3,10 @@
   "identifier": "main-window",
   "description": "Minimal capability set for the Singularity Live main window.",
   "windows": ["main"],
-  "permissions": ["allow-get-app-status"]
+  "permissions": [
+    "allow-get-app-status",
+    "allow-get-manual-assistance-readiness",
+    "allow-start-manual-assistance",
+    "allow-cancel-manual-assistance"
+  ]
 }
