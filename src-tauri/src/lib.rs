@@ -3,6 +3,7 @@ mod commands;
 pub mod config;
 pub mod context;
 pub mod domain;
+pub mod providers;
 pub mod secrets;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
