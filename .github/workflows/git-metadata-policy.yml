@@ -1,0 +1,51 @@
+name: Git metadata policy
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate capability-focused naming
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out pull-request history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate branch, pull request, and commit subjects
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          forbidden='(^|[^[:alpha:]])phase([[:space:]_-]*[0-9]+)?([^[:alpha:]]|$)'
+          failed=0
+
+          check_value() {
+            local label="$1"
+            local value="$2"
+
+            if grep --extended-regexp --ignore-case --quiet "$forbidden" <<<"$value"; then
+              echo "::error::$label must describe the capability or change without roadmap phase labels."
+              failed=1
+            fi
+          }
+
+          check_value "Branch name" "$HEAD_BRANCH"
+          check_value "Pull-request title" "$PR_TITLE"
+          check_value "Pull-request description" "$PR_BODY"
+
+          while IFS= read -r subject; do
+            check_value "Commit subject: $subject" "$subject"
+          done < <(git log --format=%s "$BASE_SHA..HEAD")
+
+          exit "$failed"

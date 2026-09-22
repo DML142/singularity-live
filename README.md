@@ -92,3 +92,5 @@ start silently on launch, and no stealth or screen-capture-evasion behavior is i
 
 Read [tech.md](tech.md) for the full architecture, roadmap, and current implementation
 status. Significant decisions are recorded under [`docs/adr`](docs/adr).
+
+Contribution and Git naming rules are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
