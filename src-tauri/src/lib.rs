@@ -1,6 +1,7 @@
 pub mod app;
 mod commands;
 pub mod config;
+pub mod context;
 pub mod domain;
 pub mod secrets;
 
