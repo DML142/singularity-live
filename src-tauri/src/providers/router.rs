@@ -51,6 +51,16 @@ impl TextGenerationRouter for ProviderRouter {
         self.config.model()
     }
 
+    fn check_readiness(&self) -> Result<(), ProviderError> {
+        self.secret_store
+            .get(SecretName::OpenRouterApiKey)
+            .map(|_| ())
+            .map_err(|_| ProviderError {
+                kind: ProviderErrorKind::Configuration,
+                message: "OpenRouter credential is not configured".to_owned(),
+            })
+    }
+
     async fn stream(
         &self,
         request: &TextGenerationRequest,

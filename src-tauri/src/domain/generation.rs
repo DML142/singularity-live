@@ -133,6 +133,13 @@ pub enum StreamEvent {
         delta: String,
     },
     Completed(CompletedResponse),
+    Cancelled {
+        request_id: RequestId,
+    },
+    Failed {
+        request_id: RequestId,
+        error: ProviderError,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

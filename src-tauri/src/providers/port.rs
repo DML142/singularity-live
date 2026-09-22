@@ -38,6 +38,12 @@ pub trait TextGenerationProvider: Send + Sync {
 pub trait TextGenerationRouter: Send + Sync {
     fn provider(&self) -> ProviderId;
     fn model(&self) -> &ModelId;
+    /// Checks that the configured provider can resolve its required credential.
+    ///
+    /// # Errors
+    ///
+    /// Returns a safe configuration error when the provider cannot start a request.
+    fn check_readiness(&self) -> Result<(), ProviderError>;
 
     /// Routes a text-generation request through the configured provider.
     ///
