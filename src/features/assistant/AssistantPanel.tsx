@@ -156,6 +156,11 @@ export function AssistantPanel() {
                     {error}
                   </p>
                 ) : null}
+                {phase === "cancelled" && answer.length > 0 ? (
+                  <p className="state-copy" role="status">
+                    Request cancelled
+                  </p>
+                ) : null}
                 {busy && error !== null ? (
                   <p className="assistant-error" role="alert">
                     {error}

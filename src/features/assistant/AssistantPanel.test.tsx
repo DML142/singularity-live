@@ -148,6 +148,11 @@ describe("manual assistant panel", () => {
     });
     act(() => {
       receiveEvent?.({ type: "started", requestId: currentRequestId });
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: currentRequestId,
+        delta: "Partial response",
+      });
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -156,6 +161,7 @@ describe("manual assistant panel", () => {
       receiveEvent?.({ type: "cancelled", requestId: currentRequestId });
     });
     expect(screen.getByText("Request cancelled")).toBeInTheDocument();
+    expect(screen.getByText("Partial response")).toBeInTheDocument();
 
     fireEvent.change(composer, { target: { value: "Try again" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
