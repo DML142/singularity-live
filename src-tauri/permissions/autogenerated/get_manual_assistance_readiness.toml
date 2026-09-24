@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-manual-assistance-readiness"
+description = "Enables the get_manual_assistance_readiness command without any pre-configured scope."
+commands.allow = ["get_manual_assistance_readiness"]
+
+[[permission]]
+identifier = "deny-get-manual-assistance-readiness"
+description = "Denies the get_manual_assistance_readiness command without any pre-configured scope."
+commands.deny = ["get_manual_assistance_readiness"]

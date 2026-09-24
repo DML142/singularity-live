@@ -33,7 +33,7 @@ body,
   margin: 0;
 }
 body {
-  min-width: 640px;
+  min-width: 360px;
   min-height: 100vh;
   background: var(--color-canvas);
 }
@@ -247,15 +247,206 @@ button:focus-visible {
   background: var(--color-signal);
 }
 
+.assistant-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+.assistant-panel > .panel-header {
+  flex: 0 0 auto;
+}
+.assistant-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding-top: 20px;
+}
+.assistant-response {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: flex-start;
+  gap: 16px;
+  overflow: auto;
+  padding-bottom: 18px;
+}
+.assistant-response > .response-rule,
+.assistant-notice > .response-rule {
+  flex: 0 0 28px;
+}
+.assistant-response-content {
+  max-width: 76ch;
+  min-width: 0;
+  padding-top: 1px;
+}
+.assistant-answer {
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assistant-complete {
+  margin: 14px 0 0;
+  color: var(--color-ready);
+  font-size: 11px;
+}
+.assistant-error {
+  margin: 0;
+  color: #f19a86;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.assistant-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 0;
+}
+.assistant-notice-warning .response-rule {
+  background: var(--color-signal);
+}
+.assistant-notice .state-copy + .state-copy {
+  margin-top: 9px;
+}
+.assistant-composer {
+  flex: 0 0 auto;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+  background: #14191c;
+  transition: border-color 120ms ease;
+}
+.assistant-composer:focus-within {
+  border-color: var(--color-ready);
+}
+.assistant-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  padding: 12px 14px 7px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.assistant-composer textarea::placeholder {
+  color: var(--color-dim);
+}
+.assistant-composer textarea:focus {
+  outline: none;
+}
+.assistant-composer textarea:disabled {
+  opacity: 0.7;
+}
+.composer-footer {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--color-line);
+  padding: 6px 8px 6px 14px;
+}
+.composer-hint {
+  color: var(--color-dim);
+  font-size: 10px;
+}
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.assistant-send,
+.assistant-cancel {
+  min-width: 66px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 4px;
+  padding: 7px 11px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.assistant-send {
+  border-color: #d39e3e;
+  background: #e4ab41;
+  color: #171714;
+  font-weight: 650;
+}
+.assistant-cancel {
+  color: var(--color-muted);
+}
+.assistant-send:hover:not(:disabled) {
+  background: #f0bd5c;
+}
+.assistant-cancel:hover:not(:disabled) {
+  border-color: var(--color-ready);
+  color: var(--color-text);
+}
+.assistant-send:disabled,
+.assistant-cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
 @media (max-width: 760px) {
   .app-header {
     padding: 0 18px;
   }
   .workspace {
-    grid-template-columns: 220px minmax(420px, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .session-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .workspace-main {
+    grid-template-rows: minmax(240px, 0.85fr) minmax(300px, 1.15fr);
   }
   .workspace-panel {
     padding: 18px;
+  }
+  .composer-footer {
+    align-items: flex-end;
+  }
+}
+
+@media (max-width: 440px) {
+  .app-header {
+    min-height: 66px;
+    padding: 0 12px;
+  }
+  .header-actions {
+    gap: 10px;
+  }
+  .backend-status {
+    font-size: 10px;
+  }
+  .settings-button {
+    padding: 6px 8px;
+  }
+  .workspace-panel {
+    padding: 16px 14px;
+  }
+  .composer-footer {
+    padding-left: 9px;
+  }
+  .composer-hint {
+    max-width: 145px;
+    line-height: 1.45;
   }
 }
 
@@ -264,5 +455,8 @@ button:focus-visible {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+  }
+  .assistant-composer {
+    transition: none;
   }
 }

@@ -1,25 +1,24 @@
 # Singularity Live
 
-Singularity Live is a desktop context copilot intended to combine live conversation,
-screen context, persistent user context, and configurable AI providers. The current
-repository contains the production foundation only: a Tauri 2 desktop shell, a strict
-React frontend, one typed frontend-to-Rust status boundary, tests, CI, and the product
-architecture.
-
-No audio capture, screenshots, provider calls, API-key handling, or session assistance
-is implemented yet. Those capabilities are planned and sequenced in [tech.md](tech.md).
+Singularity Live is a desktop context copilot for working with live conversation, screen
+context, persistent user context, and configurable AI providers. The app now supports
+manual text assistance through OpenRouter, with context packs loaded by Rust from the
+application data directory. Audio, screenshots, session history, and persistent credential
+storage remain future work; the implementation record is in [tech.md](tech.md).
 
 ## Current status
 
-Phase 0 (Foundation) is implemented. Its completion status is governed by the validation
-record in `tech.md`; later roadmap phases are not started.
+The desktop foundation and manual context/provider path are implemented. The provider path
+has automated coverage; a live OpenRouter request has not been verified in this workspace.
+The roadmap status and validation evidence are recorded in [tech.md](tech.md).
 
 The shell currently provides:
 
-- an honest idle workspace for session, transcript, and assistant areas;
+- an honest idle workspace for session and transcript areas, plus a manual request composer;
 - backend readiness loaded through a typed Tauri IPC command;
-- a Rust application service that owns the application status response;
-- strict, least-privilege defaults with no provider or capture permissions.
+- Rust-owned context loading, provider configuration, credentials, routing, and streaming;
+- safe setup guidance when OpenRouter or the configured context pack is unavailable;
+- exact Tauri permissions for status, readiness, start, and cancel commands.
 
 ## Technology
 
@@ -64,6 +63,65 @@ Run the desktop application with the real Rust IPC boundary:
 pnpm tauri dev
 ```
 
+## Manual text assistance
+
+The first provider is OpenRouter. Set the following variables in the environment inherited
+by `pnpm tauri dev`:
+
+```sh
+export SINGULARITY_LIVE_PROVIDER=openrouter
+export SINGULARITY_LIVE_MODEL=openrouter/free
+export SINGULARITY_LIVE_CONTEXT_PACK=fictional-developer
+export SINGULARITY_LIVE_REQUEST_TIMEOUT_SECONDS=60
+pnpm tauri dev
+```
+
+Set `OPENROUTER_API_KEY` in the same desktop process environment using your local secret
+manager or shell environment setup. The app reads it only in Rust. Do not put it in a
+`VITE_` variable, frontend `.env` file, source file, or Tauri command argument. The included
+`openrouter/free` model slug routes each request to a currently available free model, so the
+underlying model may vary between requests. Availability and behavior can change; see
+[OpenRouter's free router](https://openrouter.ai/openrouter/free) and
+[model catalog](https://openrouter.ai/models).
+
+The app accepts an OpenRouter model slug in `SINGULARITY_LIVE_MODEL`. It does not provide a
+model picker or automatically change models. An unset or unsupported provider/model
+configuration leaves the app open and shows safe setup guidance.
+
+Context packs are read from Tauri's platform-specific application data directory at
+`context-packs/<SINGULARITY_LIVE_CONTEXT_PACK>/`. With this app's current identifier,
+`local.singularity.live`, the base locations are:
+
+- Linux: `$XDG_DATA_HOME/local.singularity.live` or `~/.local/share/local.singularity.live`.
+- macOS: `~/Library/Application Support/local.singularity.live`.
+- Windows: `%APPDATA%\local.singularity.live`.
+
+These bases come from Tauri's [`app_data_dir()`](https://docs.rs/tauri/latest/tauri/path/struct.PathResolver.html#method.app_data_dir) API. Copy the sanitized example into the configured directory, for example:
+
+```text
+<app-data>/context-packs/fictional-developer/
+├── manifest.yaml
+├── answer-style.md
+└── sample-projects.md
+```
+
+The repository example is in [`docs/examples/context-packs/fictional-developer`](docs/examples/context-packs/fictional-developer). Copy that directory's contents into the runtime path; the app never reads context from the repository checkout.
+
+Manifest schema version 1 contains a pack ID, a display name, and at most 16 Markdown
+documents. Packs outside app data, symlinked pack directories, unknown fields, invalid or
+escaping manifest/document paths, missing files, and oversized content are rejected.
+Limits are 32 KiB for the manifest, 64 KiB per document, and 256 KiB for the loaded pack.
+Documents marked `always_include` are always selected; other documents are
+included in manifest order only when a configured keyword or phrase matches the request.
+The 16 KiB request limit is enforced in Rust. Context is sent as reference material in the
+system message; the user's text stays in a separate message.
+
+Only one request can be active. Use Cancel to stop the current request; the provider-stream
+timeout defaults to 60 seconds and can be set from 5 to 300 seconds. Context preparation
+happens before that timeout begins. Provider errors are mapped to safe categories and
+messages, with no automatic retry or fallback. Credentials never cross IPC, enter React
+state, or appear in logs.
+
 Common validation commands:
 
 ```bash
@@ -82,10 +140,11 @@ development packages before Rust checks can compile the webview runtime.
 
 ## Architecture and privacy
 
-The webview is treated as an untrusted presentation layer relative to secrets. Future
-provider communication, credential storage, capture, persistence, and OS integration all
-belong in Rust behind narrow typed commands. React never receives raw provider keys and
-does not call model providers directly.
+The webview is treated as an untrusted presentation layer relative to secrets. Provider
+communication, credential lookup, context loading, capture, persistence, and OS integration
+belong in Rust behind narrow typed commands. The environment-backed credential source is
+for local development; React never receives provider keys and does not call model providers
+directly.
 
 Raw audio and screenshots are planned to be transient by default. Capture will never
 start silently on launch, and no stealth or screen-capture-evasion behavior is in scope.

@@ -1,6 +1,10 @@
 mod application_status;
+mod manual_assistance;
 
 pub use application_status::{ApplicationStatus, BackendState, application_status};
+pub use manual_assistance::{
+    ManualAssistanceError, ManualAssistanceReadiness, ManualAssistanceService,
+};
 
 #[cfg(test)]
 mod tests {
