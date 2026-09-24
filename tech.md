@@ -500,7 +500,7 @@ has not been verified in this workspace, so Phase 1 remains in progress.
 
 | Check                                                                                 | Result                                                                                  |
 | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 pnpm check` | Passed on 2026-09-25: 11 frontend tests, 45 Rust tests, lint, types, builds, and checks |
+| `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 pnpm check` | Passed on 2026-09-25: 11 frontend tests, 47 Rust tests, lint, types, builds, and checks |
 | Tauri development startup                                                             | Built and started the native binary with provider configuration explicitly unset        |
 | Live OpenRouter request                                                               | Not run; `OPENROUTER_API_KEY` was not configured in the shell environment               |
 

@@ -261,6 +261,42 @@ fn readiness_does_not_echo_values_from_a_malformed_context_manifest() {
     assert!(!message.contains("PRIVATE_SENTINEL"));
 }
 
+#[test]
+fn readiness_does_not_echo_manifest_validation_values() {
+    let pack = PackFixture::new();
+    let manifest = MANIFEST.replace(
+        "keywords: [rust]",
+        "keywords: [privatecredential, privatecredential]",
+    );
+    fs::write(pack.path().join("manifest.yaml"), manifest).expect("write invalid manifest");
+    let service = service(&pack, Arc::new(FakeRouter::new(RouterBehavior::Success)));
+
+    let ManualAssistanceReadiness::Unconfigured { message } = service.readiness() else {
+        panic!("invalid context should be unavailable");
+    };
+
+    assert!(!message.contains("privatecredential"));
+}
+
+#[tokio::test]
+async fn request_context_errors_do_not_echo_manifest_validation_values() {
+    let pack = PackFixture::new();
+    let manifest = MANIFEST.replace(
+        "keywords: [rust]",
+        "keywords: [privatecredential, privatecredential]",
+    );
+    fs::write(pack.path().join("manifest.yaml"), manifest).expect("write invalid manifest");
+    let service = service(&pack, Arc::new(FakeRouter::new(RouterBehavior::Success)));
+    let (sink, _) = channel_sink();
+
+    let error = service
+        .start("Help me".to_owned(), sink)
+        .await
+        .expect_err("invalid context must prevent provider submission");
+
+    assert!(!error.to_string().contains("privatecredential"));
+}
+
 #[cfg(unix)]
 #[test]
 fn readiness_rejects_a_context_packs_directory_that_escapes_app_data() {

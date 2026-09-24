@@ -80,15 +80,15 @@ impl ManualAssistanceService {
                 message: error.message,
             };
         }
-        if let Err(error) = ContextPackLoader::load_beneath(
+        if ContextPackLoader::load_beneath(
             &runtime.context_pack_root,
             &runtime.context_pack_directory,
-        ) {
+        )
+        .is_err()
+        {
             return ManualAssistanceReadiness::Unconfigured {
-                message: format!(
-                    "Context pack {} is unavailable: {error}",
-                    runtime.context_pack_id
-                ),
+                message: "The configured context pack is invalid. Check its manifest and referenced Markdown files."
+                    .to_owned(),
             };
         }
         ManualAssistanceReadiness::Ready {
@@ -139,10 +139,10 @@ impl ManualAssistanceService {
         .await;
         let selected_context = match context_result {
             Ok(Ok(context)) => context,
-            Ok(Err(error)) => {
+            Ok(Err(_error)) => {
                 self.clear_active(request_id);
                 return Err(ManualAssistanceError::ContextUnavailable {
-                    message: error.to_string(),
+                    message: "The configured context pack could not be loaded".to_owned(),
                 });
             }
             Err(_) => {
