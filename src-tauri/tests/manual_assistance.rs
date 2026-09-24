@@ -1,7 +1,10 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex, Weak,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use async_trait::async_trait;
@@ -155,6 +158,28 @@ impl StreamSink for ChannelSink {
     }
 }
 
+struct TerminalObserverSink {
+    service: Weak<ManualAssistanceService>,
+    was_active_at_terminal: Arc<AtomicBool>,
+}
+
+impl StreamSink for TerminalObserverSink {
+    fn emit(&self, event: StreamEvent) -> Result<(), ProviderError> {
+        if matches!(
+            event,
+            StreamEvent::Completed(_) | StreamEvent::Cancelled { .. } | StreamEvent::Failed { .. }
+        ) {
+            let was_active = self
+                .service
+                .upgrade()
+                .is_some_and(|service| service.has_active_request());
+            self.was_active_at_terminal
+                .store(was_active, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+}
+
 fn service(
     pack: &PackFixture,
     router: Arc<dyn TextGenerationRouter>,
@@ -283,6 +308,34 @@ async fn loads_selected_context_and_forwards_a_successful_stream() {
     assert_eq!(requests[0].user_text, "Explain my Rust work.");
     assert_eq!(requests[0].selected_context.documents.len(), 2);
     assert!(requests[0].system_prompt.contains("Uses Rust daily."));
+}
+
+#[tokio::test]
+async fn releases_the_active_slot_before_publishing_a_terminal_event() {
+    let pack = PackFixture::new();
+    let service = service(&pack, Arc::new(FakeRouter::new(RouterBehavior::Success)));
+    let was_active_at_terminal = Arc::new(AtomicBool::new(true));
+    let sink = Arc::new(TerminalObserverSink {
+        service: Arc::downgrade(&service),
+        was_active_at_terminal: Arc::clone(&was_active_at_terminal),
+    });
+
+    service
+        .start("Check terminal ordering".to_owned(), sink)
+        .await
+        .expect("request starts");
+
+    timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if !service.has_active_request() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("active slot released");
+    assert!(!was_active_at_terminal.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

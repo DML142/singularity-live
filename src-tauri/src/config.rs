@@ -40,11 +40,7 @@ impl AppConfig {
         let provider_value = required(source, "SINGULARITY_LIVE_PROVIDER")?;
         let provider = match provider_value.as_str() {
             "openrouter" => ProviderId::OpenRouter,
-            _ => {
-                return Err(ConfigError::UnsupportedProvider {
-                    provider: provider_value,
-                });
-            }
+            _ => return Err(ConfigError::UnsupportedProvider),
         };
 
         let model_value = required(source, "SINGULARITY_LIVE_MODEL")?;
@@ -86,8 +82,8 @@ impl AppConfig {
 pub enum ConfigError {
     #[error("Required setting {key} is not configured")]
     Missing { key: &'static str },
-    #[error("Unsupported provider {provider}; expected openrouter")]
-    UnsupportedProvider { provider: String },
+    #[error("Unsupported provider; expected openrouter")]
+    UnsupportedProvider,
     #[error("Invalid model setting: {0}")]
     InvalidModel(IdentifierError),
     #[error("Invalid context pack identifier")]

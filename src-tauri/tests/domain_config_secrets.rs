@@ -55,18 +55,19 @@ fn configuration_requires_every_named_setting() {
 #[test]
 fn configuration_accepts_only_openrouter() {
     let mut source = MapConfigSource::valid();
+    let untrusted_value = "provider-value-that-must-not-cross-ipc";
     source
         .values
-        .insert("SINGULARITY_LIVE_PROVIDER", "openai".to_owned());
+        .insert("SINGULARITY_LIVE_PROVIDER", untrusted_value.to_owned());
 
     let error = AppConfig::from_source(&source).expect_err("unsupported provider must fail");
 
+    assert_eq!(error, ConfigError::UnsupportedProvider);
     assert_eq!(
-        error,
-        ConfigError::UnsupportedProvider {
-            provider: "openai".to_owned(),
-        }
+        error.to_string(),
+        "Unsupported provider; expected openrouter"
     );
+    assert!(!error.to_string().contains(untrusted_value));
 }
 
 #[test]

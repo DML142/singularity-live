@@ -170,8 +170,8 @@ impl ManualAssistanceService {
                 }
                 Err(error) => StreamEvent::Failed { request_id, error },
             };
-            let _ = sink.emit(terminal_event);
             service.clear_active(request_id);
+            let _ = sink.emit(terminal_event);
         });
 
         Ok(request_id)

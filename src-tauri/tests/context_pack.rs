@@ -77,6 +77,19 @@ fn loads_a_valid_versioned_pack_and_markdown_documents() {
 }
 
 #[test]
+fn loads_the_sanitized_repository_example() {
+    let example_directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/examples/context-packs/fictional-developer");
+
+    let pack = ContextPackLoader::load(&example_directory).expect("example context pack");
+    let selected = select_context(&pack, "Review a Rust API project.");
+
+    assert_eq!(pack.id(), "fictional-developer");
+    assert_eq!(pack.document_count(), 2);
+    assert_eq!(selected.documents.len(), 2);
+}
+
+#[test]
 fn rejects_unsupported_schema_versions() {
     let fixture = ContextFixture::valid();
     fixture.write(
