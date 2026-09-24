@@ -1,0 +1,14 @@
+schema_version: 1
+id: fictional-developer
+name: Fictional Developer
+documents:
+  - id: answer-style
+    title: Answer style
+    path: answer-style.md
+    always_include: true
+    keywords: []
+  - id: sample-projects
+    title: Sample projects
+    path: sample-projects.md
+    always_include: false
+    keywords: [project, rust, API]
