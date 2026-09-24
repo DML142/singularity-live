@@ -108,17 +108,19 @@ These bases come from Tauri's [`app_data_dir()`](https://docs.rs/tauri/latest/ta
 The repository example is in [`docs/examples/context-packs/fictional-developer`](docs/examples/context-packs/fictional-developer). Copy that directory's contents into the runtime path; the app never reads context from the repository checkout.
 
 Manifest schema version 1 contains a pack ID, a display name, and at most 16 Markdown
-documents. Unknown fields, invalid or escaping paths, missing files, and oversized content
-are rejected. Limits are 32 KiB for the manifest, 64 KiB per document, and 256 KiB for the
-loaded pack. Documents marked `always_include` are always selected; other documents are
+documents. Packs outside app data, symlinked pack directories, unknown fields, invalid or
+escaping manifest/document paths, missing files, and oversized content are rejected.
+Limits are 32 KiB for the manifest, 64 KiB per document, and 256 KiB for the loaded pack.
+Documents marked `always_include` are always selected; other documents are
 included in manifest order only when a configured keyword or phrase matches the request.
 The 16 KiB request limit is enforced in Rust. Context is sent as reference material in the
 system message; the user's text stays in a separate message.
 
-Only one request can be active. Use Cancel to stop the current request; the default total
-timeout is 60 seconds and can be set from 5 to 300 seconds. Provider errors are mapped to
-safe categories and messages, with no automatic retry or fallback. Credentials never cross
-IPC, enter React state, or appear in logs.
+Only one request can be active. Use Cancel to stop the current request; the provider-stream
+timeout defaults to 60 seconds and can be set from 5 to 300 seconds. Context preparation
+happens before that timeout begins. Provider errors are mapped to safe categories and
+messages, with no automatic retry or fallback. Credentials never cross IPC, enter React
+state, or appear in logs.
 
 Common validation commands:
 

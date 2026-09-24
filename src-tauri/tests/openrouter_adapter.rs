@@ -241,6 +241,35 @@ async fn rejects_malformed_and_incomplete_streams() {
 }
 
 #[tokio::test]
+async fn rejects_a_complete_stream_event_over_the_size_limit() {
+    let content = "x".repeat(70 * 1024);
+    let event = Box::leak(
+        format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{content}\"}}}}]}}\n\n")
+            .into_boxed_str(),
+    );
+    let (endpoint, _) = start_server(MockResponse {
+        status: 200,
+        body_chunks: vec![event],
+        delay_before_response: Duration::ZERO,
+    })
+    .await;
+    let adapter = OpenRouterAdapter::with_test_endpoint(
+        reqwest::Client::new(),
+        endpoint,
+        Duration::from_secs(2),
+    );
+    let sink = RecordingSink::default();
+
+    let error = adapter
+        .stream(&request(), &secret(), CancellationToken::new(), &sink)
+        .await
+        .expect_err("oversized event must fail");
+
+    assert_eq!(error.kind, ProviderErrorKind::MalformedResponse);
+    assert!(sink.events().is_empty());
+}
+
+#[tokio::test]
 async fn classifies_http_failures_without_returning_provider_bodies() {
     for (status, expected_kind) in [
         (401, ProviderErrorKind::Authentication),
@@ -335,7 +364,7 @@ async fn classifies_connection_failures_as_transport_errors() {
 }
 
 #[tokio::test]
-async fn enforces_total_request_timeout() {
+async fn enforces_provider_stream_timeout() {
     let (endpoint, _) = start_server(MockResponse {
         status: 200,
         body_chunks: vec!["data: [DONE]\n\n"],

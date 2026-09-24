@@ -202,6 +202,9 @@ async fn parse_stream(
         }
 
         while let Some(event_end) = find_event_end(&buffer) {
+            if event_end > MAX_STREAM_EVENT_BYTES {
+                return Err(malformed_response());
+            }
             let delimiter_length = event_delimiter_length(&buffer, event_end);
             let event = buffer.drain(..event_end).collect::<Vec<_>>();
             buffer.drain(..delimiter_length);

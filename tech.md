@@ -166,9 +166,9 @@ flowchart LR
 ```
 
 The current router selects OpenRouter from typed startup configuration and enforces the
-configured model and timeout. It supports cancellation and classifies authentication,
-configuration, invalid-request, rate-limit, timeout, transport, provider, cancellation, and
-malformed-response failures. It does not retry or fall back. Provider DTOs, endpoints,
+configured model and provider-stream timeout. It supports cancellation and classifies
+authentication, configuration, invalid-request, rate-limit, timeout, transport, provider,
+cancellation, and malformed-response failures. It does not retry or fall back. Provider DTOs, endpoints,
 authorization headers, and SSE parsing stay inside the adapter. Prompt construction is
 centralized behind a context selector and prompt builder, never assembled in components.
 
@@ -177,9 +177,9 @@ centralized behind a context selector and prompt builder, never assembled in com
 Runtime context packs live under Tauri's platform-specific application data directory at
 `context-packs/<pack-id>/`, never a hard-coded user path or the Git checkout. A pack uses a
 strict schema-versioned YAML manifest that references human-readable Markdown files. The
-repository includes a fictional and sanitized example. The loader rejects unknown schema
-fields, invalid paths, traversal and symlink escapes, missing files, and content beyond
-documented size limits.
+repository includes a fictional and sanitized example. The loader rejects packs outside
+application data, symlinked pack directories, unknown schema fields, invalid paths,
+traversal and symlink escapes, missing files, and content beyond documented size limits.
 
 Context selection is layered:
 
@@ -498,11 +498,11 @@ Automated tests use local fixtures and mock HTTP responses; they do not need
 `OPENROUTER_API_KEY` and do not make live or paid provider calls. A live OpenRouter request
 has not been verified in this workspace, so Phase 1 remains in progress.
 
-| Check                            | Result                                                                                  |
-| -------------------------------- | --------------------------------------------------------------------------------------- |
-| `CARGO_INCREMENTAL=0 pnpm check` | Passed on 2026-09-25: 11 frontend tests, 39 Rust tests, lint, types, builds, and checks |
-| Tauri development startup        | Built and started the native binary with provider configuration explicitly unset        |
-| Live OpenRouter request          | Not run; `OPENROUTER_API_KEY` was not configured in the shell environment               |
+| Check                                                                                 | Result                                                                                  |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 pnpm check` | Passed on 2026-09-25: 11 frontend tests, 45 Rust tests, lint, types, builds, and checks |
+| Tauri development startup                                                             | Built and started the native binary with provider configuration explicitly unset        |
+| Live OpenRouter request                                                               | Not run; `OPENROUTER_API_KEY` was not configured in the shell environment               |
 
 ### Toolchain and tested versions
 

@@ -151,6 +151,11 @@ export function AssistantPanel() {
                     Response complete
                   </p>
                 ) : null}
+                {phase === "failed" && answer.length > 0 && error !== null ? (
+                  <p className="assistant-error" role="alert">
+                    {error}
+                  </p>
+                ) : null}
                 {busy && error !== null ? (
                   <p className="assistant-error" role="alert">
                     {error}

@@ -166,6 +166,43 @@ fn rejects_symlinks_that_escape_the_pack_directory() {
     ));
 }
 
+#[cfg(unix)]
+#[test]
+fn rejects_a_manifest_symlink_that_escapes_the_pack_directory() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = ContextFixture::valid();
+    let outside = tempfile::NamedTempFile::new().expect("outside manifest");
+    fs::write(outside.path(), VALID_MANIFEST).expect("write outside manifest");
+    fs::remove_file(fixture.path().join("manifest.yaml")).expect("remove fixture manifest");
+    symlink(outside.path(), fixture.path().join("manifest.yaml")).expect("create symlink");
+
+    assert!(fixture.load().is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_a_pack_directory_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = ContextFixture::valid();
+    let parent = tempfile::tempdir().expect("pack parent");
+    let linked_pack = parent.path().join("fictional-developer");
+    symlink(fixture.path(), &linked_pack).expect("create pack symlink");
+
+    assert!(ContextPackLoader::load(&linked_pack).is_err());
+}
+
+#[test]
+fn does_not_echo_manifest_values_in_parse_errors() {
+    let fixture = ContextFixture::valid();
+    fixture.write("manifest.yaml", "schema_version: \"PRIVATE_SENTINEL\"\n");
+
+    let error = fixture.load().expect_err("manifest schema must be numeric");
+
+    assert!(!error.to_string().contains("PRIVATE_SENTINEL"));
+}
+
 #[test]
 fn rejects_duplicate_document_ids_and_keywords() {
     let duplicate_id = ContextFixture::valid();

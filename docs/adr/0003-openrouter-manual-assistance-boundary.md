@@ -26,7 +26,7 @@ general-purpose HTTP endpoint.
 - Load strict, versioned context packs from Tauri's application-data path. Select documents
   deterministically and send the current user text separately from context.
 - Keep one active manual request, keyed by a Rust-generated stable ID, with explicit
-  cancellation and a total request timeout.
+  cancellation and a bounded provider-stream timeout.
 
 ## Alternatives considered
 

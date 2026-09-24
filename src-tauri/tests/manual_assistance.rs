@@ -184,7 +184,13 @@ fn service(
     pack: &PackFixture,
     router: Arc<dyn TextGenerationRouter>,
 ) -> Arc<ManualAssistanceService> {
+    let context_pack_root = pack
+        .path()
+        .parent()
+        .expect("pack parent directory")
+        .to_owned();
     Arc::new(ManualAssistanceService::configured(
+        context_pack_root,
         pack.path(),
         "fictional".to_owned(),
         router,
@@ -224,12 +230,60 @@ fn readiness_reports_configuration_and_context_failures_safely() {
     );
 
     let missing_context = Arc::new(ManualAssistanceService::configured(
+        pack.path()
+            .parent()
+            .expect("pack parent directory")
+            .to_owned(),
         pack.path().join("missing"),
         "missing".to_owned(),
         Arc::new(FakeRouter::new(RouterBehavior::Success)),
     ));
     assert!(matches!(
         missing_context.readiness(),
+        ManualAssistanceReadiness::Unconfigured { .. }
+    ));
+}
+
+#[test]
+fn readiness_does_not_echo_values_from_a_malformed_context_manifest() {
+    let pack = PackFixture::new();
+    fs::write(
+        pack.path().join("manifest.yaml"),
+        "schema_version: \"PRIVATE_SENTINEL\"\n",
+    )
+    .expect("write malformed manifest");
+    let service = service(&pack, Arc::new(FakeRouter::new(RouterBehavior::Success)));
+
+    let ManualAssistanceReadiness::Unconfigured { message } = service.readiness() else {
+        panic!("malformed context should be unavailable");
+    };
+
+    assert!(!message.contains("PRIVATE_SENTINEL"));
+}
+
+#[cfg(unix)]
+#[test]
+fn readiness_rejects_a_context_packs_directory_that_escapes_app_data() {
+    use std::os::unix::fs::symlink;
+
+    let pack = PackFixture::new();
+    let app_data = tempfile::tempdir().expect("application data directory");
+    let linked_packs = app_data.path().join("context-packs");
+    symlink(
+        pack.path().parent().expect("pack parent directory"),
+        &linked_packs,
+    )
+    .expect("create escaping context-pack parent");
+    let linked_pack = linked_packs.join(pack.path().file_name().expect("pack directory name"));
+    let service = ManualAssistanceService::configured(
+        app_data.path().to_owned(),
+        linked_pack,
+        "fictional".to_owned(),
+        Arc::new(FakeRouter::new(RouterBehavior::Success)),
+    );
+
+    assert!(matches!(
+        service.readiness(),
         ManualAssistanceReadiness::Unconfigured { .. }
     ));
 }

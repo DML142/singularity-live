@@ -163,6 +163,12 @@ describe("manual assistant panel", () => {
       expect(client.start).toHaveBeenCalledTimes(2);
     });
     act(() => {
+      receiveEvent?.({ type: "started", requestId: nextRequestId });
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: nextRequestId,
+        delta: "Partial response",
+      });
       receiveEvent?.({
         type: "failed",
         requestId: nextRequestId,
@@ -174,6 +180,7 @@ describe("manual assistant panel", () => {
     expect(
       screen.getByText("OpenRouter rate limit reached; try again later"),
     ).toBeInTheDocument();
+    expect(screen.getByText("Partial response")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
   });
 

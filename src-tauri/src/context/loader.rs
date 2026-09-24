@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     fs,
+    io::Read,
     path::{Component, Path},
 };
 
@@ -61,10 +62,42 @@ impl ContextPackLoader {
     /// Returns a typed error when the manifest, referenced paths, or content violate the
     /// versioned schema and safety limits.
     pub fn load(pack_directory: &Path) -> Result<ContextPack, ContextError> {
+        Self::load_from(pack_directory, None)
+    }
+
+    /// Loads a context pack only when its resolved directory stays inside the supplied root.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error when the pack resolves outside `allowed_root` or violates the
+    /// versioned schema and safety limits.
+    pub fn load_beneath(
+        allowed_root: &Path,
+        pack_directory: &Path,
+    ) -> Result<ContextPack, ContextError> {
+        Self::load_from(pack_directory, Some(allowed_root))
+    }
+
+    fn load_from(
+        pack_directory: &Path,
+        allowed_root: Option<&Path>,
+    ) -> Result<ContextPack, ContextError> {
+        let pack_metadata =
+            fs::symlink_metadata(pack_directory).map_err(|_| ContextError::MissingPackDirectory)?;
+        if pack_metadata.file_type().is_symlink() {
+            return Err(ContextError::PackDirectorySymlink);
+        }
         let pack_root =
             fs::canonicalize(pack_directory).map_err(|_| ContextError::MissingPackDirectory)?;
         if !pack_root.is_dir() {
             return Err(ContextError::MissingPackDirectory);
+        }
+        if let Some(allowed_root) = allowed_root {
+            let canonical_allowed_root =
+                fs::canonicalize(allowed_root).map_err(|_| ContextError::MissingPackDirectory)?;
+            if !pack_root.starts_with(canonical_allowed_root) {
+                return Err(ContextError::PackOutsideAllowedRoot);
+            }
         }
         let manifest = read_manifest(&pack_root)?;
 
@@ -91,17 +124,36 @@ impl ContextPackLoader {
 
 fn read_manifest(pack_root: &Path) -> Result<ContextManifest, ContextError> {
     let manifest_path = pack_root.join("manifest.yaml");
+    let canonical_path =
+        fs::canonicalize(&manifest_path).map_err(|_| ContextError::MissingManifest)?;
+    if !canonical_path.starts_with(pack_root) {
+        return Err(ContextError::ManifestOutsidePack);
+    }
     let manifest_metadata =
-        fs::metadata(&manifest_path).map_err(|_| ContextError::MissingManifest)?;
+        fs::metadata(&canonical_path).map_err(|_| ContextError::MissingManifest)?;
+    if !manifest_metadata.is_file() {
+        return Err(ContextError::InvalidManifestFile);
+    }
     if manifest_metadata.len() > MAX_MANIFEST_BYTES {
         return Err(ContextError::ManifestTooLarge {
             bytes: manifest_metadata.len(),
         });
     }
-    let source =
-        fs::read_to_string(&manifest_path).map_err(|error| ContextError::MalformedManifest {
-            reason: error.to_string(),
+    let file = fs::File::open(&canonical_path).map_err(|_| ContextError::MissingManifest)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_MANIFEST_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ContextError::MalformedManifest {
+            reason: "could not read manifest".to_owned(),
         })?;
+    if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err(ContextError::ManifestTooLarge {
+            bytes: bytes.len() as u64,
+        });
+    }
+    let source = String::from_utf8(bytes).map_err(|_| ContextError::MalformedManifest {
+        reason: "manifest is not valid UTF-8".to_owned(),
+    })?;
     let version = serde_yaml_ng::from_str::<VersionProbe>(&source)
         .map_err(|error| malformed_manifest(&error))?;
     if version.schema_version != SUPPORTED_SCHEMA_VERSION {
@@ -115,9 +167,9 @@ fn read_manifest(pack_root: &Path) -> Result<ContextManifest, ContextError> {
     Ok(manifest)
 }
 
-fn malformed_manifest(error: &serde_yaml_ng::Error) -> ContextError {
+fn malformed_manifest(_error: &serde_yaml_ng::Error) -> ContextError {
     ContextError::MalformedManifest {
-        reason: error.to_string(),
+        reason: "invalid YAML syntax".to_owned(),
     }
 }
 
@@ -199,8 +251,16 @@ fn load_document(
 pub enum ContextError {
     #[error("Context pack directory does not exist")]
     MissingPackDirectory,
+    #[error("Context pack directory must not be a symbolic link")]
+    PackDirectorySymlink,
+    #[error("Context pack resolves outside the application data directory")]
+    PackOutsideAllowedRoot,
     #[error("Context pack manifest.yaml is missing")]
     MissingManifest,
+    #[error("Context pack manifest.yaml resolves outside its pack")]
+    ManifestOutsidePack,
+    #[error("Context pack manifest.yaml must be a regular file")]
+    InvalidManifestFile,
     #[error("Context pack manifest exceeds the 32 KiB limit ({bytes} bytes)")]
     ManifestTooLarge { bytes: u64 },
     #[error("Context pack manifest is malformed: {reason}")]

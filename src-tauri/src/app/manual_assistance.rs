@@ -27,6 +27,7 @@ enum ManualAssistanceRuntime {
 }
 
 struct ConfiguredRuntime {
+    context_pack_root: PathBuf,
     context_pack_directory: PathBuf,
     context_pack_id: String,
     router: Arc<dyn TextGenerationRouter>,
@@ -40,12 +41,14 @@ struct ActiveRequest {
 impl ManualAssistanceService {
     #[must_use]
     pub fn configured(
+        context_pack_root: PathBuf,
         context_pack_directory: PathBuf,
         context_pack_id: String,
         router: Arc<dyn TextGenerationRouter>,
     ) -> Self {
         Self {
             runtime: ManualAssistanceRuntime::Configured(ConfiguredRuntime {
+                context_pack_root,
                 context_pack_directory,
                 context_pack_id,
                 router,
@@ -77,7 +80,10 @@ impl ManualAssistanceService {
                 message: error.message,
             };
         }
-        if let Err(error) = ContextPackLoader::load(&runtime.context_pack_directory) {
+        if let Err(error) = ContextPackLoader::load_beneath(
+            &runtime.context_pack_root,
+            &runtime.context_pack_directory,
+        ) {
             return ManualAssistanceReadiness::Unconfigured {
                 message: format!(
                     "Context pack {} is unavailable: {error}",
@@ -123,10 +129,11 @@ impl ManualAssistanceService {
         let cancellation = CancellationToken::new();
         self.reserve(request_id, cancellation.clone())?;
 
+        let pack_root = runtime.context_pack_root.clone();
         let pack_path = runtime.context_pack_directory.clone();
         let selection_text = text.clone();
         let context_result = tokio::task::spawn_blocking(move || {
-            let pack = ContextPackLoader::load(&pack_path)?;
+            let pack = ContextPackLoader::load_beneath(&pack_root, &pack_path)?;
             Ok::<_, crate::context::ContextError>(select_context(&pack, &selection_text))
         })
         .await;

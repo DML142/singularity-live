@@ -72,10 +72,11 @@ adapter selection and returns a configuration error for any unsupported value. T
 allows another explicit adapter later without introducing fallback policy now.
 
 The manual-assistance coordinator permits one active request. Starting a second request
-returns a busy error. Each active request owns a cancellation token and a total request
-deadline. Cancellation or timeout drops the HTTP stream and produces exactly one terminal
-event. A cancellation command must name the current request ID; stale IDs cannot cancel a
-newer request.
+returns a busy error. Each active provider stream has a bounded deadline after context
+preparation. Cancellation or timeout drops the HTTP stream and produces exactly one
+terminal event. Context loading happens before the provider-stream deadline begins. A
+cancellation command must name the current request ID; stale IDs cannot cancel a newer
+request.
 
 ## Configuration and secret boundary
 
@@ -128,10 +129,12 @@ documents:
 ```
 
 Unknown fields are rejected. IDs and keywords are non-empty, normalized, length-bounded,
-and unique where applicable. Document paths must be relative, must contain only normal path
-components, and must end in `.md`. Absolute paths, parent components, platform prefixes,
-symlink escapes, missing files, non-files, and canonical paths outside the pack directory
-are rejected.
+and unique where applicable. Pack paths must resolve under application data; a symlinked
+pack directory is rejected. The manifest must be a bounded regular file whose canonical
+path remains inside the pack. Document paths must be relative, must contain only normal
+path components, and must end in `.md`. Absolute paths, parent components, platform
+prefixes, symlink escapes, missing files, non-files, and canonical paths outside the pack
+directory are rejected.
 
 Limits are enforced before provider submission:
 
@@ -206,7 +209,8 @@ Behavior is developed test-first. Rust tests cover:
 - OpenRouter request translation;
 - incremental SSE parsing, usage extraction, provider-stream errors, and malformed chunks;
 - HTTP/status error classification with a local mock server;
-- total timeout, explicit cancellation, stale cancellation, and one-active-request behavior;
+- provider-stream timeout, explicit cancellation, stale cancellation, and one-active-request
+  behavior;
 - safe IPC request validation and event serialization.
 
 Frontend tests mock only the Tauri boundary and cover readiness, streaming rendering,

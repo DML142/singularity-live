@@ -60,6 +60,7 @@ fn manual_assistance_service(app_data_directory: &Path) -> Arc<ManualAssistanceS
         reqwest::Client::new(),
     ));
     Arc::new(ManualAssistanceService::configured(
+        app_data_directory.to_owned(),
         context_pack_directory,
         context_pack_id,
         router,
