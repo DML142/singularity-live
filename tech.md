@@ -93,8 +93,10 @@ and delegate; they do not contain business logic. Infrastructure adapters know t
 external APIs. Domain types do not know React, individual providers, SQLite, xcap, or
 WASAPI.
 
-Phase 0 intentionally contains only the application-status service and command needed to
-prove this vertical boundary. Future directories are created when code exists for them.
+The current vertical slice contains application status and manual text assistance. Manual
+requests pass through narrow Tauri commands to a Rust application service, which loads
+selected context and uses a provider-independent request through the configured router.
+Future directories are created when code exists for them.
 
 ## 6. Frontend responsibilities
 
@@ -102,7 +104,7 @@ React owns:
 
 - semantic, accessible presentation;
 - local interaction and focused UI state;
-- incremental rendering of future backend event streams;
+- the manual request composer and incremental rendering of backend event streams;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -118,17 +120,19 @@ Rust owns:
 
 - application services and session orchestration;
 - provider communication and routing;
-- secure secret storage;
+- credential lookup behind the Rust `SecretStore` port;
 - filesystem and platform paths;
 - audio and screen capture;
 - persistence and context loading;
 - image preprocessing and system shortcuts;
 - safe error mapping and structured technical logging.
 
-Current Rust code exposes only `get_app_status`. The command delegates to a small
-provider-independent application service and returns application name, version, and
-backend state. Startup uses `expect` only for the invariant that a Tauri application must
-initialize to run; runtime or user-controlled operations must return typed errors.
+Rust exposes `get_app_status` and three manual-assistance commands for readiness, request
+start, and cancellation. The service validates text, selects context, permits one active
+request, and returns typed failures. Provider networking, context loading, configuration,
+and credential lookup stay in Rust. Startup uses `expect` only for the invariant that a
+Tauri application must initialize to run; runtime or user-controlled operations return
+typed errors.
 
 ## 8. Security boundaries
 
@@ -138,20 +142,20 @@ be narrow and typed—never a generic action dispatcher, filesystem gateway, she
 HTTP proxy, or SQL endpoint.
 
 Tauri capabilities grant only application commands declared in the Rust build manifest;
-the main window currently receives only `allow-get-app-status` and no plugin permissions.
-Permissions are added only with an implemented feature and reviewed for least privilege.
-Provider keys must never enter Vite environment variables, localStorage, Zustand, logs, or
-IPC responses. A future
-`SecretStore` port will use an OS-backed credential facility selected during Phase 1/6.
+the main window receives `allow-get-app-status`, `allow-get-manual-assistance-readiness`,
+`allow-start-manual-assistance`, and `allow-cancel-manual-assistance`, with no plugin
+permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
+logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
+development only; OS-backed credential storage remains future security work.
 
 Sensitive content is excluded from logs by default. API keys, authorization headers, raw
 audio, screenshots, full context packs, and full provider payloads must not be logged.
 
 ## 9. Provider architecture
 
-Planned capability ports are speech-to-text, text generation, vision, and multimodal
-generation. Groq, Gemini, and OpenRouter are initial adapter candidates, not domain
-dependencies.
+Planned capability ports include speech-to-text, text generation, vision, and multimodal
+generation. Text generation currently has one direct OpenRouter adapter; OpenRouter is an
+infrastructure choice, not a domain dependency.
 
 ```mermaid
 flowchart LR
@@ -161,20 +165,21 @@ flowchart LR
   Adapter --> Vendor[External provider]
 ```
 
-The future router will evaluate capability, configured model, priority, fallbacks, timeout,
-retry policy, cost metadata, and availability. Authentication and invalid-request failures
-are not blindly retried. Provider DTOs stay inside adapters. Prompt construction is
+The current router selects OpenRouter from typed startup configuration and enforces the
+configured model and timeout. It supports cancellation and classifies authentication,
+configuration, invalid-request, rate-limit, timeout, transport, provider, cancellation, and
+malformed-response failures. It does not retry or fall back. Provider DTOs, endpoints,
+authorization headers, and SSE parsing stay inside the adapter. Prompt construction is
 centralized behind a context selector and prompt builder, never assembled in components.
-
-No provider interfaces, router, HTTP client, or provider dependencies exist in Phase 0.
 
 ## 10. Context architecture
 
-Runtime context packs will live under the platform-specific application data directory,
-never a hard-coded user path or the Git checkout. A pack uses a schema-versioned YAML
-manifest that references human-readable Markdown files such as profile, experience,
-projects, preferences, answer style, and rules. Repository examples, when added, must be
-fictional and sanitized.
+Runtime context packs live under Tauri's platform-specific application data directory at
+`context-packs/<pack-id>/`, never a hard-coded user path or the Git checkout. A pack uses a
+strict schema-versioned YAML manifest that references human-readable Markdown files. The
+repository includes a fictional and sanitized example. The loader rejects unknown schema
+fields, invalid paths, traversal and symlink escapes, missing files, and content beyond
+documented size limits.
 
 Context selection is layered:
 
@@ -183,10 +188,10 @@ Context selection is layered:
 3. recent transcript turns;
 4. the current text, speech, or screenshot input.
 
-An intent classifier will later distinguish technical, behavioral, experience, coding,
-screenshot, system-design, clarification, and general requests. It must select only
-relevant context to reduce latency, cost, privacy exposure, and token use. Context loading
-and routing are not implemented in Phase 0.
+The current deterministic selector preserves manifest order and includes `always_include`
+documents plus documents whose configured complete keyword or phrase occurs in normalized
+manual input. It avoids sending non-matching documents. Intent classification and rolling
+session context remain later work.
 
 ## 11. Session architecture
 
@@ -240,15 +245,18 @@ cost reduction. Screenshot capture is not implemented in Phase 0.
 ## 15. Testing strategy
 
 - Frontend behavior uses Vitest and React Testing Library with external IPC mocked at the
-  Tauri API boundary, not component internals.
-- Rust domain and application behavior uses built-in unit tests.
-- Later adapters use integration tests and mock servers; persistence uses isolated database
-  tests; capture uses platform-specific integration checks.
+  Tauri API boundary. Tests cover readiness, event validation, streaming, stale events,
+  duplicate submission, keyboard behavior, cancellation, failure recovery, and focus.
+- Rust domain and application behavior uses unit and integration tests.
+- The OpenRouter adapter uses a local mock HTTP server for request mapping, SSE parsing,
+  provider error classification, timeout, and cancellation. Automated tests need no API key
+  and make no provider calls.
 - Tests protect observable behavior, not private structure or prose.
 - CI runs formatting, linting, type checking, tests, and builds for the current foundation.
 
-Phase 0 includes a shell behavior test proving backend-driven readiness and honest empty
-states, plus a Rust service test proving product identity and backend readiness.
+The shell tests backend readiness and honest setup states; focused frontend tests exercise
+the manual request flow, and Rust tests cover provider-independent behavior and the local
+OpenRouter mock-server boundary.
 
 ## 16. Repository conventions
 
@@ -329,9 +337,11 @@ and release packaging.
 streaming request path, manual input UI, tests, and relevant ADRs.
 
 **Acceptance criteria:** Secrets never cross IPC; manual requests stream through the router;
-context schemas validate; adapters and failure mapping are tested; docs match implementation.
+context schemas validate; adapters and failure mapping are tested; docs match implementation;
+a real desktop request is verified when a user-supplied development credential is available.
 
-**Status:** Not started
+**Status:** In progress — implementation and automated checks are complete; live OpenRouter
+request verification has not been performed.
 
 ### Phase 2 — Screen understanding
 
@@ -443,12 +453,21 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 ### Implemented
 
 - pnpm workspace with pinned package manager and committed lockfile.
-- Strict React/TypeScript/Vite/Tailwind frontend with focused Zustand status state.
-- Accessible dark desktop shell for session, transcript, and assistant empty states.
-- Typed `get_app_status` frontend client and narrow Tauri command.
-- Rust application-status service and meaningful unit test.
-- Explicit permission for the status command, no Tauri plugin permissions, and a production
-  content security policy without `unsafe-inline`.
+- Strict React/TypeScript/Vite/Tailwind frontend with focused Zustand stores.
+- Accessible desktop shell with a manual text composer, streaming response, cancellation,
+  readiness guidance, safe failures, keyboard handling, and focus restoration.
+- Typed clients for application status and manual-assistance IPC; unknown event payloads are
+  validated at runtime and stale request IDs are ignored.
+- Rust application-status service and manual-assistance coordinator with one active request.
+- Versioned context-pack validation, safe Markdown loading, deterministic selection, and
+  bounded prompt construction.
+- Typed OpenRouter configuration, Rust-only environment secret lookup, provider-independent
+  text-generation ports, router, streaming adapter, timeout, cancellation, and safe failure
+  classification.
+- Explicit permissions for the four implemented commands, no Tauri plugin permissions,
+  and a production content security policy without `unsafe-inline`.
+- Fictional context-pack example, OpenRouter setup instructions, and a focused provider and
+  credential-boundary ADR.
 - Frontend behavior test, formatting, lint, type checking, build scripts, and CI.
 - Rust formatting, Clippy, test, and check scripts.
 - Public README, this engineering guide, and focused ADRs.
@@ -456,9 +475,9 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 
 ### Architecturally planned, not implemented
 
-All provider adapters, API keys, secure storage, context packs, sessions, screenshots,
-audio, VAD, transcription, streaming assistant output, SQLite, history, shortcuts, tray,
-compact mode, updater, signing, and production packaging.
+Additional provider adapters, OS-backed credential storage, sessions, screenshots, audio,
+VAD, transcription, SQLite, history, shortcuts, tray, compact mode, updater, signing, and
+production packaging.
 
 ### Phase 0 validation record
 
@@ -472,6 +491,18 @@ through WebKitGTK's development inspector; no capture or provider permissions we
 | Tauri GUI launch and real IPC                  | Passed; native webview reported `Backend ready` at 1080×720 |
 | Ignore rules, metadata, tutorial, secret scan  | Passed repository review                                    |
 | README command and architecture accuracy       | Passed repository review                                    |
+
+### Context and provider validation record
+
+Automated tests use local fixtures and mock HTTP responses; they do not need
+`OPENROUTER_API_KEY` and do not make live or paid provider calls. A live OpenRouter request
+has not been verified in this workspace, so Phase 1 remains in progress.
+
+| Check                            | Result                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------- |
+| `CARGO_INCREMENTAL=0 pnpm check` | Passed on 2026-09-25: 11 frontend tests, 39 Rust tests, lint, types, builds, and checks |
+| Tauri development startup        | Built and started the native binary with provider configuration explicitly unset        |
+| Live OpenRouter request          | Not run; `OPENROUTER_API_KEY` was not configured in the shell environment               |
 
 ### Toolchain and tested versions
 
@@ -495,6 +526,7 @@ current stable compatible direct versions:
 
 - [ADR 0001: Tauri desktop architecture](docs/adr/0001-tauri-desktop-architecture.md)
 - [ADR 0002: Provider-neutral application boundary](docs/adr/0002-provider-neutral-application-boundary.md)
+- [ADR 0003: OpenRouter and the manual-assistance trust boundary](docs/adr/0003-openrouter-manual-assistance-boundary.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform
