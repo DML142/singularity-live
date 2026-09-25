@@ -149,8 +149,9 @@ HTTP proxy, or SQL endpoint.
 Tauri capabilities grant only application commands declared in the Rust build manifest;
 the main window receives `allow-get-app-status`, `allow-get-manual-assistance-readiness`,
 `allow-start-manual-assistance`, `allow-cancel-manual-assistance`, and
-`allow-reset-session`, plus `core:event:allow-listen` for the streaming UI. It receives no
-plugin permissions. Provider keys never enter Vite environment variables, localStorage,
+`allow-reset-session`, plus `core:event:allow-listen` and `core:event:allow-unlisten` for the
+streaming UI. It receives no plugin permissions. Provider keys never enter Vite environment
+variables, localStorage,
 Zustand, logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for
 local development only; OS-backed credential storage remains future security work.
 
@@ -492,8 +493,8 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 - Typed OpenRouter configuration, Rust-only environment secret lookup, provider-independent
   text-generation ports, router, streaming adapter, timeout, cancellation, and safe failure
   classification.
-- Explicit permissions for the five implemented application commands and event listening,
-  no Tauri plugin permissions, and a production content security policy without
+- Explicit permissions for the five implemented application commands and event listening
+  and cleanup, no Tauri plugin permissions, and a production content security policy without
   `unsafe-inline`.
 - Fictional context-pack example, OpenRouter setup instructions, and a focused provider and
   credential-boundary ADR.

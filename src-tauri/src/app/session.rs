@@ -384,14 +384,20 @@ pub enum ManualAssistanceError {
 }
 
 struct LimitedTextSink {
-    text: Mutex<String>,
+    text: Mutex<RetainedText>,
     max_bytes: usize,
+}
+
+#[derive(Default)]
+struct RetainedText {
+    text: String,
+    truncated: bool,
 }
 
 impl LimitedTextSink {
     fn new(max_bytes: usize) -> Self {
         Self {
-            text: Mutex::new(String::new()),
+            text: Mutex::new(RetainedText::default()),
             max_bytes,
         }
     }
@@ -400,6 +406,7 @@ impl LimitedTextSink {
         self.text
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .text
             .clone()
     }
 }
@@ -416,7 +423,7 @@ impl StreamSink for LimitedTextSink {
 
 struct RetainingStreamSink {
     downstream: Arc<dyn StreamSink>,
-    retained: Mutex<String>,
+    retained: Mutex<RetainedText>,
     max_bytes: usize,
 }
 
@@ -424,7 +431,7 @@ impl RetainingStreamSink {
     fn new(downstream: Arc<dyn StreamSink>, max_bytes: usize) -> Self {
         Self {
             downstream,
-            retained: Mutex::new(String::new()),
+            retained: Mutex::new(RetainedText::default()),
             max_bytes,
         }
     }
@@ -433,6 +440,7 @@ impl RetainingStreamSink {
         self.retained
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .text
             .clone()
     }
 }
@@ -448,7 +456,7 @@ impl StreamSink for RetainingStreamSink {
 }
 
 impl LimitedTextSink {
-    fn text_lock(&self) -> MutexGuard<'_, String> {
+    fn text_lock(&self) -> MutexGuard<'_, RetainedText> {
         self.text
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -456,16 +464,21 @@ impl LimitedTextSink {
 }
 
 impl RetainingStreamSink {
-    fn retained_lock(&self) -> MutexGuard<'_, String> {
+    fn retained_lock(&self) -> MutexGuard<'_, RetainedText> {
         self.retained
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
-fn retain_limited(retained: &mut String, text: &str, max_bytes: usize) {
-    let remaining = max_bytes.saturating_sub(retained.len());
-    retained.push_str(truncate_to_bytes(text, remaining));
+fn retain_limited(retained: &mut RetainedText, text: &str, max_bytes: usize) {
+    if retained.truncated {
+        return;
+    }
+    let remaining = max_bytes.saturating_sub(retained.text.len());
+    let retained_delta = truncate_to_bytes(text, remaining);
+    retained.truncated = retained_delta.len() < text.len();
+    retained.text.push_str(retained_delta);
 }
 
 async fn compact_history(
@@ -530,7 +543,10 @@ fn validate_input(text: &str) -> Result<String, ManualAssistanceError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Mutex};
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex},
+    };
 
     use async_trait::async_trait;
     use tokio::sync::mpsc;
@@ -539,13 +555,22 @@ mod tests {
     use crate::{
         context::{SessionHistory, SessionTurn},
         domain::{
-            CompletedResponse, ModelId, ProviderError, ProviderErrorKind, ProviderId, StreamEvent,
-            TextGenerationRequest,
+            CompletedResponse, ModelId, ProviderError, ProviderErrorKind, ProviderId, RequestId,
+            StreamEvent, TextGenerationRequest,
         },
         providers::{StreamSink, TextGenerationRouter},
     };
 
-    use super::{SessionLifecycle, SessionService};
+    use super::{LimitedTextSink, RetainingStreamSink, SessionLifecycle, SessionService};
+
+    struct RecordingSink(Mutex<Vec<StreamEvent>>);
+
+    impl StreamSink for RecordingSink {
+        fn emit(&self, event: StreamEvent) -> Result<(), ProviderError> {
+            self.0.lock().expect("recording sink events").push(event);
+            Ok(())
+        }
+    }
 
     enum RouterStep {
         Complete(String),
@@ -627,6 +652,62 @@ mod tests {
                 message: "The event consumer is unavailable".to_owned(),
             })
         }
+    }
+
+    #[test]
+    fn summary_retention_stops_after_a_unicode_boundary_is_truncated() {
+        let sink = LimitedTextSink::new(4);
+        let request_id = RequestId::new();
+
+        sink.emit(StreamEvent::TextDelta {
+            request_id,
+            delta: "abcé".to_owned(),
+        })
+        .expect("first summary delta is accepted");
+        sink.emit(StreamEvent::TextDelta {
+            request_id,
+            delta: "X".to_owned(),
+        })
+        .expect("second summary delta is accepted");
+
+        assert_eq!(sink.text(), "abc");
+    }
+
+    #[test]
+    fn answer_retention_stops_after_a_unicode_boundary_is_truncated() {
+        let downstream = Arc::new(RecordingSink(Mutex::new(Vec::new())));
+        let sink = RetainingStreamSink::new(downstream.clone(), 4);
+        let request_id = RequestId::new();
+
+        sink.emit(StreamEvent::TextDelta {
+            request_id,
+            delta: "abcé".to_owned(),
+        })
+        .expect("first answer delta is forwarded");
+        sink.emit(StreamEvent::TextDelta {
+            request_id,
+            delta: "X".to_owned(),
+        })
+        .expect("second answer delta is forwarded");
+
+        assert_eq!(sink.retained_text(), "abc");
+        assert_eq!(
+            downstream
+                .0
+                .lock()
+                .expect("recorded answer events")
+                .as_slice(),
+            &[
+                StreamEvent::TextDelta {
+                    request_id,
+                    delta: "abcé".to_owned(),
+                },
+                StreamEvent::TextDelta {
+                    request_id,
+                    delta: "X".to_owned(),
+                },
+            ]
+        );
     }
 
     #[tokio::test]

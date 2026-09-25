@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 #[test]
-fn main_window_can_listen_and_reset_session() {
+fn main_window_can_manage_session_events_and_reset_session() {
     let capability: serde_json::Value =
         serde_json::from_str(include_str!("../capabilities/main-window.json"))
             .expect("main-window capability is valid JSON");
@@ -13,6 +13,11 @@ fn main_window_can_listen_and_reset_session() {
         permissions
             .iter()
             .any(|value| value == "core:event:allow-listen")
+    );
+    assert!(
+        permissions
+            .iter()
+            .any(|value| value == "core:event:allow-unlisten")
     );
     assert!(
         permissions
