@@ -283,7 +283,8 @@ OpenRouter mock-server boundary.
 - Keep TypeScript strict and avoid `any`, suppression comments, and unsafe assertions.
 - Avoid runtime `unwrap` in Rust and blocking work on async threads.
 - Add a dependency only for an implemented capability.
-- Use conventional semantic commit messages and feature-oriented branch names.
+- Use conventional semantic commit messages and feature-oriented branch names without
+  `codex/`, `phase/`, or other agent/tool prefixes.
 - Do not include coding-agent names or generated attribution in source, branches, or commits.
 - Keep local orchestration in ignored `AGENTS.md` and `.ai/`; product decisions belong here
   or in ADRs.

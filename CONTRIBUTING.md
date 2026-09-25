@@ -6,8 +6,9 @@ Git metadata describes the concrete capability or change being delivered. Roadma
 are planning concepts documented in `tech.md`; they are not release names or Git naming
 conventions.
 
-- Name branches after the work, such as `context-provider-core` or
-  `fix/backend-status-validation`.
+- Name branches after the concrete work, such as `session-scoped-context` or
+  `fix/backend-status-validation`; do not add agent/tool prefixes such as `codex/` or
+  roadmap prefixes such as `phase/`.
 - Use conventional, outcome-focused commit subjects, such as
   `feat: stream manual assistant responses`.
 - Write pull-request titles and descriptions around behavior, architecture, validation,
