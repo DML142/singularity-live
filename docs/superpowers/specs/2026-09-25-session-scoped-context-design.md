@@ -84,14 +84,14 @@ not claim image support now.
 
 All limits count UTF-8 content bytes and require no tokenizer dependency:
 
-| Context layer | Limit |
-| --- | ---: |
-| Current manual input | 16 KiB (existing limit) |
-| Recent completed exchanges | 8 exchanges and 16 KiB total |
-| System context, including instructions, static documents, and summary | 20 KiB |
-| Rolling summary | 4 KiB |
-| Combined system and conversation text | 64 KiB maximum |
-| Assistant response retained for model context per exchange | 16 KiB |
+| Context layer                                                         |                        Limit |
+| --------------------------------------------------------------------- | ---------------------------: |
+| Current manual input                                                  |      16 KiB (existing limit) |
+| Recent completed exchanges                                            | 8 exchanges and 16 KiB total |
+| System context, including instructions, static documents, and summary |                       20 KiB |
+| Rolling summary                                                       |                        4 KiB |
+| Combined system and conversation text                                 |               64 KiB maximum |
+| Assistant response retained for model context per exchange            |                       16 KiB |
 
 The independent layer limits leave room below the combined cap. The UI continues to display
 the complete streamed answer; only the session copy used for future model context is capped
