@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     domain::{
-        CompletedResponse, ProviderError, ProviderErrorKind, ProviderId, StreamEvent,
-        TextGenerationRequest, Usage,
+        CompletedResponse, ConversationRole, ProviderError, ProviderErrorKind, ProviderId,
+        StreamEvent, TextGenerationRequest, Usage,
     },
     secrets::SecretValue,
 };
@@ -101,25 +101,29 @@ impl TextGenerationProvider for OpenRouterAdapter {
 #[derive(Debug, Serialize)]
 struct OpenRouterRequest<'a> {
     model: &'a str,
-    messages: [OpenRouterMessage<'a>; 2],
+    messages: Vec<OpenRouterMessage<'a>>,
     stream: bool,
     stream_options: StreamOptions,
 }
 
 impl<'a> From<&'a TextGenerationRequest> for OpenRouterRequest<'a> {
     fn from(request: &'a TextGenerationRequest) -> Self {
+        let mut messages = Vec::with_capacity(request.messages.len() + 1);
+        messages.push(OpenRouterMessage {
+            role: "system",
+            content: &request.system_prompt,
+        });
+        messages.extend(request.messages.iter().map(|message| OpenRouterMessage {
+            role: match message.role {
+                ConversationRole::User => "user",
+                ConversationRole::Assistant => "assistant",
+            },
+            content: &message.content,
+        }));
+
         Self {
             model: request.model.as_str(),
-            messages: [
-                OpenRouterMessage {
-                    role: "system",
-                    content: &request.system_prompt,
-                },
-                OpenRouterMessage {
-                    role: "user",
-                    content: &request.user_text,
-                },
-            ],
+            messages,
             stream: true,
             stream_options: StreamOptions {
                 include_usage: true,

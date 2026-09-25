@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use singularity_live::{
     app::{ManualAssistanceError, ManualAssistanceReadiness, ManualAssistanceService},
     domain::{
-        CompletedResponse, ModelId, ProviderError, ProviderErrorKind, ProviderId, RequestId,
-        StreamEvent, TextGenerationRequest,
+        CompletedResponse, ConversationMessage, ModelId, ProviderError, ProviderErrorKind,
+        ProviderId, RequestId, StreamEvent, TextGenerationRequest,
     },
     providers::{StreamSink, TextGenerationRouter},
 };
@@ -395,7 +395,10 @@ async fn loads_selected_context_and_forwards_a_successful_stream() {
 
     let requests = captured.lock().expect("captured requests");
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].user_text, "Explain my Rust work.");
+    assert_eq!(
+        requests[0].messages,
+        vec![ConversationMessage::user("Explain my Rust work.")]
+    );
     assert_eq!(requests[0].selected_context.documents.len(), 2);
     assert!(requests[0].system_prompt.contains("Uses Rust daily."));
 }

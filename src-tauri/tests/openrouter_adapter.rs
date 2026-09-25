@@ -5,8 +5,8 @@ use std::{
 
 use singularity_live::{
     domain::{
-        ModelId, ProviderError, ProviderErrorKind, ProviderId, RequestId, SelectedContext,
-        StreamEvent, TextGenerationRequest, Usage,
+        ConversationMessage, ModelId, ProviderError, ProviderErrorKind, ProviderId, RequestId,
+        SelectedContext, StreamEvent, TextGenerationRequest, Usage,
     },
     providers::{OpenRouterAdapter, StreamSink, TextGenerationProvider},
     secrets::SecretValue,
@@ -130,7 +130,7 @@ fn request() -> TextGenerationRequest {
         model: ModelId::new("openrouter/free").expect("model"),
         selected_context: SelectedContext::default(),
         system_prompt: "Use only relevant context.".to_owned(),
-        user_text: "Explain ownership.".to_owned(),
+        messages: vec![ConversationMessage::user("Explain ownership.")],
     }
 }
 
@@ -183,7 +183,10 @@ async fn translates_requests_and_streams_text_with_usage() {
         generation_request.system_prompt
     );
     assert_eq!(json["messages"][1]["role"], "user");
-    assert_eq!(json["messages"][1]["content"], generation_request.user_text);
+    assert_eq!(
+        json["messages"][1]["content"],
+        generation_request.messages[0].content
+    );
     assert_eq!(
         sink.events(),
         vec![
@@ -205,6 +208,55 @@ async fn translates_requests_and_streams_text_with_usage() {
             total_tokens: 14,
         })
     );
+}
+
+#[tokio::test]
+async fn serializes_conversation_history_in_role_order() {
+    let (endpoint, captured_request) = start_server(MockResponse {
+        status: 200,
+        body_chunks: vec![
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n",
+            "data: [DONE]\n\n",
+        ],
+        delay_before_response: Duration::ZERO,
+    })
+    .await;
+    let adapter = OpenRouterAdapter::with_test_endpoint(
+        reqwest::Client::new(),
+        endpoint,
+        Duration::from_secs(2),
+    );
+    let mut generation_request = request();
+    generation_request.messages = vec![
+        ConversationMessage::user("What does this code do?"),
+        ConversationMessage::assistant("Send me the code and I will explain it."),
+        ConversationMessage::user("Explain this function."),
+    ];
+
+    adapter
+        .stream(
+            &generation_request,
+            &secret(),
+            CancellationToken::new(),
+            &RecordingSink::default(),
+        )
+        .await
+        .expect("mock stream succeeds");
+
+    let raw_request = captured_request.await.expect("request was captured");
+    let body = raw_request.split("\r\n\r\n").nth(1).expect("request body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("request JSON");
+    assert_eq!(json["messages"][0]["role"], "system");
+    assert_eq!(json["messages"][1]["role"], "user");
+    assert_eq!(json["messages"][1]["content"], "What does this code do?");
+    assert_eq!(json["messages"][2]["role"], "assistant");
+    assert_eq!(
+        json["messages"][2]["content"],
+        "Send me the code and I will explain it."
+    );
+    assert_eq!(json["messages"][3]["role"], "user");
+    assert_eq!(json["messages"][3]["content"], "Explain this function.");
 }
 
 #[tokio::test]

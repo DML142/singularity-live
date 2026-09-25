@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     context::{ContextPackLoader, build_system_prompt, select_context},
     domain::{
-        ModelId, ProviderErrorKind, ProviderId, RequestId, StreamEvent, TextGenerationRequest,
+        ConversationMessage, ModelId, ProviderErrorKind, ProviderId, RequestId, StreamEvent,
+        TextGenerationRequest,
     },
     providers::{StreamSink, TextGenerationRouter},
 };
@@ -160,7 +161,7 @@ impl ManualAssistanceService {
             model: router.model().clone(),
             selected_context,
             system_prompt,
-            user_text: text,
+            messages: vec![ConversationMessage::user(text)],
         };
         if sink.emit(StreamEvent::Started { request_id }).is_err() {
             self.clear_active(request_id);
