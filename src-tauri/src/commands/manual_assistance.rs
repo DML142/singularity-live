@@ -180,9 +180,9 @@ pub async fn start_manual_assistance(
     app: AppHandle,
 ) -> Result<StartManualAssistanceResponse, CommandError> {
     let sink = Arc::new(TauriEventSink { app });
-    service
-        .start(request.text, sink)
-        .await
+    let result = service.start(&request.text, sink);
+    tokio::task::yield_now().await;
+    result
         .map(|request_id| StartManualAssistanceResponse {
             request_id: request_id.to_string(),
         })

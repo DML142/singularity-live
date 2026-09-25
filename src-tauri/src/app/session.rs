@@ -132,12 +132,12 @@ impl SessionService {
     ///
     /// Returns a typed error for invalid input, unavailable provider configuration, a busy
     /// session, or an unavailable event consumer.
-    pub async fn start(
+    pub fn start(
         self: &Arc<Self>,
-        text: String,
+        text: &str,
         sink: Arc<dyn StreamSink>,
     ) -> Result<RequestId, ManualAssistanceError> {
-        let text = validate_input(&text)?;
+        let text = validate_input(text)?;
         let runtime = match &self.runtime {
             SessionRuntime::Configured(runtime) => runtime,
             SessionRuntime::Unconfigured { message } => {
@@ -212,10 +212,8 @@ impl SessionService {
         if cancellation.is_cancelled() {
             return Err(cancellation_error());
         }
-        let selected_context = match context_result {
-            Ok(Ok(context)) => context,
-            Ok(Err(_)) => return Err(context_error()),
-            Err(_) => return Err(context_error()),
+        let Ok(Ok(selected_context)) = context_result else {
+            return Err(context_error());
         };
 
         let staged_history = compact_history(
@@ -401,7 +399,7 @@ impl LimitedTextSink {
     fn text(&self) -> String {
         self.text
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 }
@@ -434,7 +432,7 @@ impl RetainingStreamSink {
     fn retained_text(&self) -> String {
         self.retained
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 }
@@ -453,7 +451,7 @@ impl LimitedTextSink {
     fn text_lock(&self) -> MutexGuard<'_, String> {
         self.text
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -461,7 +459,7 @@ impl RetainingStreamSink {
     fn retained_lock(&self) -> MutexGuard<'_, String> {
         self.retained
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -500,7 +498,7 @@ async fn compact_history(
                 message: "The session summary could not be created".to_owned(),
             });
         }
-        history.apply_summary_batch(batch, summary);
+        history.apply_summary_batch(&batch, &summary);
     }
     Ok(history)
 }
@@ -668,15 +666,14 @@ mod tests {
         let sink = std::sync::Arc::new(EventChannel(sender));
 
         service
-            .start("Current question".to_owned(), sink)
-            .await
+            .start("Current question", sink)
             .expect("request starts");
         let terminal = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 match receiver.recv().await.expect("event channel remains open") {
-                    event @ StreamEvent::Completed(_)
-                    | event @ StreamEvent::Cancelled { .. }
-                    | event @ StreamEvent::Failed { .. } => break event,
+                    event @ (StreamEvent::Completed(_)
+                    | StreamEvent::Cancelled { .. }
+                    | StreamEvent::Failed { .. }) => break event,
                     StreamEvent::Started { .. } | StreamEvent::TextDelta { .. } => {}
                 }
             }
@@ -726,15 +723,14 @@ mod tests {
         let sink = std::sync::Arc::new(EventChannel(sender));
 
         service
-            .start("Here is the code".to_owned(), sink)
-            .await
+            .start("Here is the code", sink)
             .expect("request starts");
         let terminal = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 match receiver.recv().await.expect("event channel remains open") {
-                    event @ StreamEvent::Completed(_)
-                    | event @ StreamEvent::Cancelled { .. }
-                    | event @ StreamEvent::Failed { .. } => break event,
+                    event @ (StreamEvent::Completed(_)
+                    | StreamEvent::Cancelled { .. }
+                    | StreamEvent::Failed { .. }) => break event,
                     StreamEvent::Started { .. } | StreamEvent::TextDelta { .. } => {}
                 }
             }

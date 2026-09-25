@@ -266,10 +266,7 @@ async fn next_event(receiver: &mut mpsc::UnboundedReceiver<StreamEvent>) -> Stre
 
 async fn complete_request(service: &Arc<SessionService>, text: &str) {
     let (sink, mut receiver) = channel_sink();
-    service
-        .start(text.to_owned(), sink)
-        .await
-        .expect("request starts");
+    service.start(text, sink).expect("request starts");
 
     loop {
         match next_event(&mut receiver).await {
@@ -362,8 +359,7 @@ async fn request_context_errors_do_not_echo_manifest_validation_values() {
     let (sink, mut receiver) = channel_sink();
 
     let request_id = service
-        .start("Help me".to_owned(), sink)
-        .await
+        .start("Help me", sink)
         .expect("request is reserved before context is loaded");
     assert_eq!(
         next_event(&mut receiver).await,
@@ -417,7 +413,7 @@ async fn unconfigured_service_starts_safely_and_rejects_requests() {
         }
     );
     assert_eq!(
-        service.start("Hello".to_owned(), sink).await,
+        service.start("Hello", sink),
         Err(ManualAssistanceError::NotConfigured {
             message: "Required setting SINGULARITY_LIVE_PROVIDER is not configured".to_owned(),
         })
@@ -431,11 +427,11 @@ async fn validates_manual_text_before_starting() {
     let (sink, _) = channel_sink();
 
     assert_eq!(
-        service.start("   ".to_owned(), sink.clone()).await,
+        service.start("   ", sink.clone()),
         Err(ManualAssistanceError::EmptyInput)
     );
     assert_eq!(
-        service.start("x".repeat(16 * 1024 + 1), sink).await,
+        service.start(&"x".repeat(16 * 1024 + 1), sink),
         Err(ManualAssistanceError::InputTooLarge)
     );
 }
@@ -449,8 +445,7 @@ async fn loads_selected_context_and_forwards_a_successful_stream() {
     let (sink, mut receiver) = channel_sink();
 
     let request_id = service
-        .start("Explain my Rust work.".to_owned(), sink)
-        .await
+        .start("Explain my Rust work.", sink)
         .expect("request starts");
 
     assert_eq!(
@@ -502,8 +497,7 @@ async fn releases_the_active_slot_before_publishing_a_terminal_event() {
     });
 
     service
-        .start("Check terminal ordering".to_owned(), sink)
-        .await
+        .start("Check terminal ordering", sink)
         .expect("request starts");
 
     timeout(std::time::Duration::from_secs(1), async {
@@ -529,11 +523,10 @@ async fn prevents_duplicate_submissions_and_cancels_only_the_current_request() {
     let (sink, mut receiver) = channel_sink();
 
     let request_id = service
-        .start("First".to_owned(), sink.clone())
-        .await
+        .start("First", sink.clone())
         .expect("first request starts");
     assert_eq!(
-        service.start("Second".to_owned(), sink).await,
+        service.start("Second", sink),
         Err(ManualAssistanceError::Busy)
     );
     assert_eq!(service.reset(), Err(ManualAssistanceError::Busy));
@@ -565,8 +558,7 @@ async fn provider_failures_emit_safe_terminal_events_and_release_the_active_slot
     let (sink, mut receiver) = channel_sink();
 
     let request_id = service
-        .start("First".to_owned(), sink.clone())
-        .await
+        .start("First", sink.clone())
         .expect("request starts");
     let _ = next_event(&mut receiver).await;
     assert_eq!(
@@ -591,8 +583,7 @@ async fn provider_failures_emit_safe_terminal_events_and_release_the_active_slot
     .await
     .expect("active slot released");
     service
-        .start("Recovery".to_owned(), sink)
-        .await
+        .start("Recovery", sink)
         .expect("new request starts after failure");
 }
 
@@ -703,8 +694,7 @@ async fn empty_summary_fails_safely_without_discarding_prior_history() {
 
     let (sink, mut receiver) = channel_sink();
     let request_id = service
-        .start("Follow up".to_owned(), sink)
-        .await
+        .start("Follow up", sink)
         .expect("summary request starts");
     assert_eq!(
         next_event(&mut receiver).await,
@@ -745,8 +735,7 @@ async fn cancellation_during_summary_preserves_the_old_request_context() {
 
     let (sink, mut receiver) = channel_sink();
     let request_id = service
-        .start("Waiting follow-up".to_owned(), sink)
-        .await
+        .start("Waiting follow-up", sink)
         .expect("summary request starts");
     assert_eq!(
         next_event(&mut receiver).await,
@@ -796,8 +785,7 @@ async fn cancellation_after_partial_answer_does_not_enter_future_context() {
 
     let (sink, mut receiver) = channel_sink();
     let request_id = service
-        .start("Cancelled question".to_owned(), sink)
-        .await
+        .start("Cancelled question", sink)
         .expect("answer starts");
     assert_eq!(
         next_event(&mut receiver).await,
@@ -845,8 +833,7 @@ async fn provider_failure_after_partial_answer_does_not_enter_future_context() {
 
     let (sink, mut receiver) = channel_sink();
     let request_id = service
-        .start("Failed question".to_owned(), sink)
-        .await
+        .start("Failed question", sink)
         .expect("answer starts");
     assert_eq!(
         next_event(&mut receiver).await,

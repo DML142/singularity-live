@@ -84,11 +84,11 @@ impl SessionHistory {
         })
     }
 
-    pub fn apply_summary_batch(&mut self, batch: SummaryBatch, summary: String) {
+    pub fn apply_summary_batch(&mut self, batch: &SummaryBatch, summary: &str) {
         let remove_count = batch.turn_count.min(self.recent_turns.len());
         self.recent_turns.drain(..remove_count);
         self.rolling_summary =
-            Some(truncate_to_bytes(&summary, MAX_SESSION_SUMMARY_BYTES).to_owned());
+            Some(truncate_to_bytes(summary, MAX_SESSION_SUMMARY_BYTES).to_owned());
     }
 
     #[must_use]
@@ -200,7 +200,7 @@ mod tests {
         let batch = history
             .next_summary_batch()
             .expect("ninth turn requires compaction");
-        history.apply_summary_batch(batch, "Earlier intent: explain the code.".to_owned());
+        history.apply_summary_batch(&batch, "Earlier intent: explain the code.");
 
         assert_eq!(history.recent_turn_count(), 8);
         assert!(history.recent_turn_bytes() <= 16 * 1024);
@@ -229,7 +229,7 @@ mod tests {
         let batch = history
             .next_summary_batch()
             .expect("oversized turn requires compaction");
-        history.apply_summary_batch(batch, "The user wants code explained.".to_owned());
+        history.apply_summary_batch(&batch, "The user wants code explained.");
         let current = "🙂".repeat(4096);
         let messages = history.messages_with_current(&current);
 
@@ -248,7 +248,8 @@ mod tests {
         let batch = history
             .next_summary_batch()
             .expect("one old turn must be summarized");
-        history.apply_summary_batch(batch, "🧭".repeat(3000));
+        let summary = "🧭".repeat(3000);
+        history.apply_summary_batch(&batch, &summary);
         let summary = history.rolling_summary().expect("summary exists");
         assert!(summary.len() <= 4 * 1024);
         assert!(summary.ends_with('🧭'));
@@ -302,7 +303,7 @@ mod tests {
         let mut batch_count = 0;
         while let Some(batch) = history.next_summary_batch() {
             assert!(batch.system_prompt().len() + batch.request_text().len() <= 64 * 1024);
-            history.apply_summary_batch(batch, "Earlier intent remains active.".to_owned());
+            history.apply_summary_batch(&batch, "Earlier intent remains active.");
             batch_count += 1;
         }
 
