@@ -5,6 +5,8 @@ import {
   type KeyboardEvent,
   type SubmitEvent,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { WorkspacePanel } from "../../components/ui/WorkspacePanel";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
@@ -12,14 +14,15 @@ import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
 export function AssistantPanel() {
   const readiness = useManualAssistanceStore((state) => state.readiness);
   const phase = useManualAssistanceStore((state) => state.phase);
-  const answer = useManualAssistanceStore((state) => state.answer);
-  const error = useManualAssistanceStore((state) => state.error);
+  const turns = useManualAssistanceStore((state) => state.turns);
   const cancelPending = useManualAssistanceStore((state) => state.cancelPending);
   const initialize = useManualAssistanceStore((state) => state.initialize);
   const start = useManualAssistanceStore((state) => state.start);
   const cancel = useManualAssistanceStore((state) => state.cancel);
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const conversationRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
   const previousPhase = useRef(phase);
 
   useEffect(() => {
@@ -51,19 +54,33 @@ export function AssistantPanel() {
     previousPhase.current = phase;
   }, [phase]);
 
+  useEffect(() => {
+    const conversation = conversationRef.current;
+    if (conversation !== null && stickToBottom.current) {
+      conversation.scrollTop = conversation.scrollHeight;
+    }
+  }, [turns]);
+
+  const submitPrompt = (prompt: string) => {
+    if (prompt.trim().length > 0) {
+      stickToBottom.current = true;
+      setText("");
+      if (composerRef.current !== null) {
+        composerRef.current.style.height = "56px";
+      }
+      void start(prompt);
+    }
+  };
+
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (text.trim().length > 0) {
-      void start(text);
-    }
+    submitPrompt(text);
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      if (text.trim().length > 0) {
-        void start(text);
-      }
+      submitPrompt(text);
     }
   };
 
@@ -108,65 +125,86 @@ export function AssistantPanel() {
           </div>
         ) : (
           <>
-            <div className="assistant-response">
-              <div className="response-rule" aria-hidden="true" />
-              <div className="assistant-response-content">
-                {answer.length > 0 ? (
-                  <div
-                    className="assistant-answer"
-                    role="log"
-                    aria-label="Assistant response"
-                    aria-live="polite"
-                    aria-relevant="additions"
-                  >
-                    {answer}
-                  </div>
-                ) : busy ? (
-                  <p className="state-copy" role="status" aria-live="polite">
-                    Preparing a response…
-                  </p>
-                ) : phase === "cancelled" ? (
-                  <p className="state-copy" role="status">
-                    Request cancelled
-                  </p>
-                ) : phase === "failed" && error !== null ? (
-                  <p className="assistant-error" role="alert">
-                    {error}
-                  </p>
-                ) : phase === "completed" ? (
-                  <p className="state-copy" role="status">
-                    The provider returned an empty response. Try again.
-                  </p>
-                ) : (
-                  <>
+            <div
+              ref={conversationRef}
+              className="assistant-conversation"
+              role="log"
+              aria-label="Conversation"
+              aria-live="polite"
+              aria-relevant="additions text"
+              onScroll={(event) => {
+                const conversation = event.currentTarget;
+                stickToBottom.current =
+                  conversation.scrollHeight -
+                    conversation.scrollTop -
+                    conversation.clientHeight <
+                  80;
+              }}
+            >
+              {turns.length === 0 ? (
+                <div className="assistant-empty">
+                  <span className="response-rule" aria-hidden="true" />
+                  <div>
                     <p className="state-title">Ready when you are</p>
                     <p className="state-copy">
                       Ask about the text you are working on. Relevant context is added
                       automatically.
                     </p>
-                  </>
-                )}
-                {phase === "completed" ? (
-                  <p className="assistant-complete" role="status">
-                    Response complete
-                  </p>
-                ) : null}
-                {phase === "failed" && answer.length > 0 && error !== null ? (
-                  <p className="assistant-error" role="alert">
-                    {error}
-                  </p>
-                ) : null}
-                {phase === "cancelled" && answer.length > 0 ? (
-                  <p className="state-copy" role="status">
-                    Request cancelled
-                  </p>
-                ) : null}
-                {busy && error !== null ? (
-                  <p className="assistant-error" role="alert">
-                    {error}
-                  </p>
-                ) : null}
-              </div>
+                  </div>
+                </div>
+              ) : (
+                turns.map((turn) => (
+                  <article className="chat-turn" key={turn.id}>
+                    <div className="chat-message chat-user-message">
+                      <p className="chat-message-label">You</p>
+                      <div className="chat-user-content">{turn.prompt}</div>
+                    </div>
+                    <div className="chat-message chat-assistant-message">
+                      <p className="chat-message-label">Assistant</p>
+                      {turn.answer.length > 0 ? (
+                        <div className="assistant-markdown">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {turn.answer}
+                          </ReactMarkdown>
+                        </div>
+                      ) : turn.phase === "starting" || turn.phase === "streaming" ? (
+                        <p className="state-copy" role="status">
+                          {turn.phase === "starting"
+                            ? "Preparing a response…"
+                            : "Generating response…"}
+                        </p>
+                      ) : turn.error !== null ? (
+                        <p className="assistant-error" role="alert">
+                          {turn.error}
+                        </p>
+                      ) : turn.phase === "cancelled" ? (
+                        <p className="state-copy" role="status">
+                          Request cancelled
+                        </p>
+                      ) : (
+                        <p className="state-copy" role="status">
+                          The provider returned an empty response. Try again.
+                        </p>
+                      )}
+                      {turn.answer.length > 0 && turn.error !== null ? (
+                        <p className="assistant-error" role="alert">
+                          {turn.error}
+                        </p>
+                      ) : null}
+                      {turn.answer.length > 0 && turn.phase === "cancelled" ? (
+                        <p className="state-copy" role="status">
+                          Request cancelled
+                        </p>
+                      ) : null}
+                      {turn.answer.length > 0 && turn.phase === "completed" ? (
+                        <p className="assistant-complete" role="status">
+                          Response complete
+                        </p>
+                      ) : null}
+                    </div>
+                  </article>
+                ))
+              )}
             </div>
 
             <form className="assistant-composer" onSubmit={submit}>
@@ -182,7 +220,10 @@ export function AssistantPanel() {
                 maxLength={16 * 1024}
                 placeholder="Write or paste text to work with…"
                 onChange={(event) => {
-                  setText(event.currentTarget.value);
+                  const composer = event.currentTarget;
+                  setText(composer.value);
+                  composer.style.height = "auto";
+                  composer.style.height = `${String(Math.min(composer.scrollHeight, 160))}px`;
                 }}
                 onKeyDown={handleComposerKeyDown}
                 disabled={busy}
