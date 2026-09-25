@@ -94,6 +94,10 @@ export async function cancelManualAssistance(requestId: string): Promise<void> {
   });
 }
 
+export async function resetManualAssistanceSession(): Promise<void> {
+  await invoke("reset_session");
+}
+
 export async function subscribeManualAssistanceEvents(
   onEvent: (event: ManualAssistanceEvent) => void,
 ): Promise<UnlistenFn> {
