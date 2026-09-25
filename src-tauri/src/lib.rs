@@ -38,6 +38,7 @@ pub fn run() {
             commands::manual_assistance::get_manual_assistance_readiness,
             commands::manual_assistance::start_manual_assistance,
             commands::manual_assistance::cancel_manual_assistance,
+            commands::manual_assistance::reset_session,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime must initialize for the application to start");

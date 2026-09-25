@@ -202,6 +202,11 @@ pub async fn cancel_manual_assistance(
     service.cancel(request_id).map_err(CommandError::from)
 }
 
+#[tauri::command]
+pub async fn reset_session(service: State<'_, Arc<SessionService>>) -> Result<(), CommandError> {
+    service.reset().map_err(CommandError::from)
+}
+
 const fn provider_error_code(kind: ProviderErrorKind) -> &'static str {
     match kind {
         ProviderErrorKind::Authentication => "authentication",
@@ -221,14 +226,14 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        app::ManualAssistanceReadiness,
+        app::{ManualAssistanceError, ManualAssistanceReadiness},
         domain::{
             CompletedResponse, ModelId, ProviderError, ProviderErrorKind, ProviderId, RequestId,
             StreamEvent, Usage,
         },
     };
 
-    use super::{ManualAssistanceEventDto, ManualRequestPayload, ReadinessDto};
+    use super::{CommandError, ManualAssistanceEventDto, ManualRequestPayload, ReadinessDto};
 
     #[test]
     fn request_payload_rejects_unknown_fields() {
@@ -256,6 +261,16 @@ mod tests {
                 "model": "openrouter/free",
                 "contextPack": "fictional"
             })
+        );
+    }
+
+    #[test]
+    fn reset_busy_error_uses_the_stable_busy_code() {
+        let error = CommandError::from(ManualAssistanceError::Busy);
+
+        assert_eq!(
+            serde_json::to_value(error).expect("command error serializes")["code"],
+            "busy"
         );
     }
 

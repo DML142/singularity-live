@@ -4,6 +4,7 @@ fn main() {
         "get_manual_assistance_readiness",
         "start_manual_assistance",
         "cancel_manual_assistance",
+        "reset_session",
     ]);
 
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
