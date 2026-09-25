@@ -356,7 +356,9 @@ describe("manual assistant panel", () => {
       await Promise.resolve();
     });
 
-    expect(screen.queryByText("Keep this question until reset")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Keep this question until reset"),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Ready when you are")).toBeInTheDocument();
   });
 

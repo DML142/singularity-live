@@ -39,12 +39,12 @@ pub fn build_session_system_prompt(context: &SelectedContext, summary: Option<&s
             break;
         }
         let content_limit = remaining - header.len() - separator_bytes;
-        let content = truncate_to_bytes(&document.content, content_limit);
+        let document_content = truncate_to_bytes(&document.content, content_limit);
         prompt.push_str(&header);
-        prompt.push_str(content);
+        prompt.push_str(document_content);
         prompt.push('\n');
-        remaining -= header.len() + content.len() + separator_bytes;
-        if content.len() < document.content.len() || remaining == 0 {
+        remaining -= header.len() + document_content.len() + separator_bytes;
+        if document_content.len() < document.content.len() || remaining == 0 {
             break;
         }
     }
