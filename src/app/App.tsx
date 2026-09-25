@@ -14,7 +14,7 @@ export function App() {
   }, [loadStatus]);
 
   return (
-    <main className="min-h-screen bg-[var(--color-canvas)] text-[var(--color-text)]">
+    <main className="app-shell bg-[var(--color-canvas)] text-[var(--color-text)]">
       <header className="app-header">
         <div className="brand-lockup">
           <span className="signal-mark" aria-hidden="true">

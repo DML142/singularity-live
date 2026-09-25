@@ -456,6 +456,8 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 - Strict React/TypeScript/Vite/Tailwind frontend with focused Zustand stores.
 - Accessible desktop shell with a manual text composer, streaming response, cancellation,
   readiness guidance, safe failures, keyboard handling, and focus restoration.
+- Responsive frontend conversation view with Markdown/code formatting and ephemeral
+  prompt/response turns; previous turns stay visible but are not sent in later requests.
 - Typed clients for application status and manual-assistance IPC; unknown event payloads are
   validated at runtime and stale request IDs are ignored.
 - Rust application-status service and manual-assistance coordinator with one active request.

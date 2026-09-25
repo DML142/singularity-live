@@ -53,6 +53,8 @@ describe("manual assistant panel", () => {
       answer: "",
       error: null,
       cancelPending: false,
+      turns: [],
+      activeTurnId: null,
     });
   });
 
@@ -103,7 +105,91 @@ describe("manual assistant panel", () => {
     });
 
     await waitFor(() => expect(composer).toHaveFocus());
-    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("keeps both sides of each exchange visible without sending prior turns again", async () => {
+    client.start.mockResolvedValueOnce("request-5").mockResolvedValueOnce("request-6");
+    render(<AssistantPanel />);
+    const composer = await screen.findByRole("textbox", {
+      name: "Ask for assistance",
+    });
+
+    fireEvent.change(composer, { target: { value: "First question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(client.start).toHaveBeenNthCalledWith(1, "First question");
+    });
+    expect(composer).toHaveValue("");
+    await screen.findByRole("button", { name: "Cancel" });
+    await act(async () => {
+      receiveEvent?.({ type: "started", requestId: "request-5" });
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: "request-5",
+        delta: "First answer",
+      });
+      receiveEvent?.({
+        type: "completed",
+        requestId: "request-5",
+        provider: "open_router",
+        model: "openrouter/free",
+        usage: null,
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    });
+
+    fireEvent.change(composer, { target: { value: "Follow-up question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(client.start).toHaveBeenNthCalledWith(2, "Follow-up question");
+    });
+    await screen.findByRole("button", { name: "Cancel" });
+    await act(async () => {
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: "request-6",
+        delta: "Follow-up answer",
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("First question")).toBeInTheDocument();
+    expect(screen.getByText("First answer")).toBeInTheDocument();
+    expect(screen.getByText("Follow-up question")).toBeInTheDocument();
+    expect(screen.getByText("Follow-up answer")).toBeInTheDocument();
+  });
+
+  it("renders fenced code in assistant responses as formatted code blocks", async () => {
+    client.start.mockResolvedValue("request-7");
+    const { container } = render(<AssistantPanel />);
+    const composer = await screen.findByRole("textbox", {
+      name: "Ask for assistance",
+    });
+    fireEvent.change(composer, { target: { value: "Write a Python calculator" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(client.start).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByRole("button", { name: "Cancel" });
+
+    await act(async () => {
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: "request-7",
+        delta:
+          "Here is the calculation:\n\n```python\nprint(1 + 1)\n```\n\n**It prints two.**",
+      });
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector("pre code.language-python")).toHaveTextContent(
+      "print(1 + 1)",
+    );
+    expect(screen.getByText("It prints two.").tagName).toBe("STRONG");
   });
 
   it("submits with Enter, preserves Shift+Enter, and prevents duplicate requests", async () => {
@@ -186,8 +272,8 @@ describe("manual assistant panel", () => {
     expect(
       screen.getByText("OpenRouter rate limit reached; try again later"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Partial response")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    expect(screen.getAllByText("Partial response")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it("shows honest configuration guidance without exposing a composer", async () => {
