@@ -360,8 +360,8 @@ streaming request path, manual input UI, tests, and relevant ADRs.
 context schemas validate; adapters and failure mapping are tested; docs match implementation;
 a real desktop request is verified when a user-supplied development credential is available.
 
-**Status:** In progress — implementation and automated checks are complete; live OpenRouter
-request verification has not been performed.
+**Status:** Completed — implementation and automated checks are complete; the user manually
+verified a real desktop OpenRouter request with text context on 2026-09-26.
 
 ### Phase 2 — Screen understanding
 
@@ -526,14 +526,15 @@ through WebKitGTK's development inspector; no capture or provider permissions we
 ### Context and provider validation record
 
 Automated tests use local fixtures and mock HTTP responses; they do not need
-`OPENROUTER_API_KEY` and do not make live or paid provider calls. A live OpenRouter request
-has not been verified in this workspace, so Phase 1 remains in progress.
+`OPENROUTER_API_KEY` and do not make live or paid provider calls. The user manually verified
+the real desktop OpenRouter text-context flow on 2026-09-26; this satisfies Phase 1's final
+acceptance criterion.
 
 | Check                                                                                 | Result                                                                                  |
 | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 pnpm check` | Passed on 2026-09-25: 11 frontend tests, 47 Rust tests, lint, types, builds, and checks |
 | Tauri development startup                                                             | Built and started the native binary with provider configuration explicitly unset        |
-| Live OpenRouter request                                                               | Not run; `OPENROUTER_API_KEY` was not configured in the shell environment               |
+| Live OpenRouter request                                                               | User manually verified real desktop text-context assistance on 2026-09-26               |
 
 ### Session intelligence validation record
 
