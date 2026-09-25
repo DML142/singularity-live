@@ -16,9 +16,12 @@ export function AssistantPanel() {
   const phase = useManualAssistanceStore((state) => state.phase);
   const turns = useManualAssistanceStore((state) => state.turns);
   const cancelPending = useManualAssistanceStore((state) => state.cancelPending);
+  const resetPending = useManualAssistanceStore((state) => state.resetPending);
+  const resetError = useManualAssistanceStore((state) => state.resetError);
   const initialize = useManualAssistanceStore((state) => state.initialize);
   const start = useManualAssistanceStore((state) => state.start);
   const cancel = useManualAssistanceStore((state) => state.cancel);
+  const resetSession = useManualAssistanceStore((state) => state.resetSession);
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -125,6 +128,23 @@ export function AssistantPanel() {
           </div>
         ) : (
           <>
+            <div className="assistant-session-controls">
+              <button
+                className="assistant-new-session"
+                type="button"
+                onClick={() => {
+                  void resetSession();
+                }}
+                disabled={busy || resetPending}
+              >
+                {resetPending ? "Resetting…" : "New session"}
+              </button>
+              {resetError !== null ? (
+                <p className="assistant-error" role="alert">
+                  {resetError}
+                </p>
+              ) : null}
+            </div>
             <div
               ref={conversationRef}
               className="assistant-conversation"
@@ -226,7 +246,7 @@ export function AssistantPanel() {
                   composer.style.height = `${String(Math.min(composer.scrollHeight, 160))}px`;
                 }}
                 onKeyDown={handleComposerKeyDown}
-                disabled={busy}
+                disabled={busy || resetPending}
               />
               <div className="composer-footer">
                 <span className="composer-hint">
@@ -248,7 +268,7 @@ export function AssistantPanel() {
                   <button
                     className="assistant-send"
                     type="submit"
-                    disabled={!text.trim() || busy}
+                    disabled={!text.trim() || busy || resetPending}
                   >
                     {phase === "starting" ? "Starting" : "Send"}
                   </button>

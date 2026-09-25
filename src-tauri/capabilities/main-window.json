@@ -7,6 +7,9 @@
     "allow-get-app-status",
     "allow-get-manual-assistance-readiness",
     "allow-start-manual-assistance",
-    "allow-cancel-manual-assistance"
+    "allow-cancel-manual-assistance",
+    "allow-reset-session",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

@@ -9,6 +9,7 @@ const client = vi.hoisted(() => ({
   getReadiness: vi.fn(),
   start: vi.fn(),
   cancel: vi.fn(),
+  reset: vi.fn(),
   subscribe: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("../../lib/tauri/manual-assistance-client", () => ({
   getManualAssistanceReadiness: client.getReadiness,
   startManualAssistance: client.start,
   cancelManualAssistance: client.cancel,
+  resetManualAssistanceSession: client.reset,
   subscribeManualAssistanceEvents: client.subscribe,
 }));
 
@@ -27,6 +29,7 @@ describe("manual assistant panel", () => {
     client.getReadiness.mockReset();
     client.start.mockReset();
     client.cancel.mockReset();
+    client.reset.mockReset();
     client.subscribe.mockReset();
     receiveEvent = undefined;
     client.getReadiness.mockResolvedValue({
@@ -40,6 +43,7 @@ describe("manual assistant panel", () => {
       return Promise.resolve(`request-${String(requestNumber)}`);
     });
     client.cancel.mockResolvedValue(undefined);
+    client.reset.mockResolvedValue(undefined);
     client.subscribe.mockImplementation(
       (listener: (event: ManualAssistanceEvent) => void) => {
         receiveEvent = listener;
@@ -53,6 +57,8 @@ describe("manual assistant panel", () => {
       answer: "",
       error: null,
       cancelPending: false,
+      resetPending: false,
+      resetError: null,
       turns: [],
       activeTurnId: null,
     });
@@ -301,5 +307,111 @@ describe("manual assistant panel", () => {
       await screen.findByText("Provider status is unavailable"),
     ).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps the old conversation visible until reset succeeds", async () => {
+    let resolveReset: (() => void) | undefined;
+    client.start.mockResolvedValue("request-8");
+    client.reset.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveReset = resolve;
+      }),
+    );
+    render(<AssistantPanel />);
+    const composer = await screen.findByRole("textbox", {
+      name: "Ask for assistance",
+    });
+    fireEvent.change(composer, { target: { value: "Keep this question until reset" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(client.start).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      receiveEvent?.({ type: "started", requestId: "request-8" });
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: "request-8",
+        delta: "Existing answer",
+      });
+      receiveEvent?.({
+        type: "completed",
+        requestId: "request-8",
+        provider: "open_router",
+        model: "openrouter/free",
+        usage: null,
+      });
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    await waitFor(() => {
+      expect(client.reset).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByText("Keep this question until reset")).toBeInTheDocument();
+    expect(screen.getByText("Existing answer")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resetting…" })).toBeDisabled();
+
+    await act(async () => {
+      resolveReset?.();
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByText("Keep this question until reset"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Ready when you are")).toBeInTheDocument();
+  });
+
+  it("disables new session while a request is active", async () => {
+    render(<AssistantPanel />);
+    const composer = await screen.findByRole("textbox", {
+      name: "Ask for assistance",
+    });
+    fireEvent.change(composer, { target: { value: "Working" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("button", { name: "Cancel" });
+
+    const resetButton = screen.getByRole("button", { name: "New session" });
+    expect(resetButton).toBeDisabled();
+    expect(client.reset).not.toHaveBeenCalled();
+  });
+
+  it("preserves the conversation and shows a safe error when reset fails", async () => {
+    client.start.mockResolvedValue("request-9");
+    client.reset.mockRejectedValue(new Error("sensitive provider detail"));
+    render(<AssistantPanel />);
+    const composer = await screen.findByRole("textbox", {
+      name: "Ask for assistance",
+    });
+    fireEvent.change(composer, { target: { value: "Question to preserve" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(client.start).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      receiveEvent?.({ type: "started", requestId: "request-9" });
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: "request-9",
+        delta: "Answer to preserve",
+      });
+      receiveEvent?.({
+        type: "completed",
+        requestId: "request-9",
+        provider: "open_router",
+        model: "openrouter/free",
+        usage: null,
+      });
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The session could not be reset. Try again.",
+    );
+    expect(screen.getByText("Question to preserve")).toBeInTheDocument();
+    expect(screen.getByText("Answer to preserve")).toBeInTheDocument();
+    expect(screen.queryByText("sensitive provider detail")).not.toBeInTheDocument();
   });
 });

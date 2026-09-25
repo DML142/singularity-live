@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Arc};
 
-use app::ManualAssistanceService;
+use app::SessionService;
 use config::{AppConfig, EnvironmentConfigSource};
 use providers::ProviderRouter;
 use secrets::EnvironmentSecretStore;
@@ -25,8 +25,8 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|application| {
             let service = match application.path().app_data_dir() {
-                Ok(app_data_directory) => manual_assistance_service(&app_data_directory),
-                Err(_) => Arc::new(ManualAssistanceService::unconfigured(
+                Ok(app_data_directory) => session_service(&app_data_directory),
+                Err(_) => Arc::new(SessionService::unconfigured(
                     "The application data directory is unavailable".to_owned(),
                 )),
             };
@@ -38,16 +38,17 @@ pub fn run() {
             commands::manual_assistance::get_manual_assistance_readiness,
             commands::manual_assistance::start_manual_assistance,
             commands::manual_assistance::cancel_manual_assistance,
+            commands::manual_assistance::reset_session,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime must initialize for the application to start");
 }
 
-fn manual_assistance_service(app_data_directory: &Path) -> Arc<ManualAssistanceService> {
+fn session_service(app_data_directory: &Path) -> Arc<SessionService> {
     let config = match AppConfig::from_source(&EnvironmentConfigSource) {
         Ok(config) => config,
         Err(error) => {
-            return Arc::new(ManualAssistanceService::unconfigured(error.to_string()));
+            return Arc::new(SessionService::unconfigured(error.to_string()));
         }
     };
     let context_pack_directory = app_data_directory
@@ -59,7 +60,7 @@ fn manual_assistance_service(app_data_directory: &Path) -> Arc<ManualAssistanceS
         Arc::new(EnvironmentSecretStore),
         reqwest::Client::new(),
     ));
-    Arc::new(ManualAssistanceService::configured(
+    Arc::new(SessionService::configured(
         app_data_directory.to_owned(),
         context_pack_directory,
         context_pack_id,

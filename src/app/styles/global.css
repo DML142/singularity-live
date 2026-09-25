@@ -293,6 +293,32 @@ button:focus-visible {
   flex-direction: column;
   padding-top: 20px;
 }
+.assistant-session-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 4px 8px;
+}
+.assistant-new-session {
+  flex: 0 0 auto;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 4px;
+  padding: 6px 9px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+.assistant-new-session:hover:not(:disabled) {
+  border-color: var(--color-ready);
+  color: var(--color-text);
+}
+.assistant-new-session:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
 .assistant-conversation {
   display: flex;
   min-width: 0;

@@ -97,6 +97,36 @@ pub struct SelectedContext {
     pub documents: Vec<ContextDocument>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConversationRole {
+    User,
+    Assistant,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConversationMessage {
+    pub role: ConversationRole,
+    pub content: String,
+}
+
+impl ConversationMessage {
+    #[must_use]
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: ConversationRole::User,
+            content: content.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: ConversationRole::Assistant,
+            content: content.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextGenerationRequest {
     pub request_id: RequestId,
@@ -104,7 +134,7 @@ pub struct TextGenerationRequest {
     pub model: ModelId,
     pub selected_context: SelectedContext,
     pub system_prompt: String,
-    pub user_text: String,
+    pub messages: Vec<ConversationMessage>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]

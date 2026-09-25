@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use singularity_live::{
     config::{AppConfig, ConfigSource},
     domain::{
-        ModelId, ProviderError, ProviderErrorKind, ProviderId, RequestId, SelectedContext,
-        StreamEvent, TextGenerationRequest,
+        ConversationMessage, ModelId, ProviderError, ProviderErrorKind, ProviderId, RequestId,
+        SelectedContext, StreamEvent, TextGenerationRequest,
     },
     providers::{ProviderRouter, StreamSink, TextGenerationRouter},
     secrets::{SecretError, SecretName, SecretStore, SecretValue},
@@ -76,7 +76,7 @@ async fn maps_missing_credentials_to_a_safe_configuration_error() {
         model: router.model().clone(),
         selected_context: SelectedContext::default(),
         system_prompt: "System".to_owned(),
-        user_text: "User".to_owned(),
+        messages: vec![ConversationMessage::user("User")],
     };
 
     let error = router

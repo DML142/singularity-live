@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelManualAssistance,
   getManualAssistanceReadiness,
+  resetManualAssistanceSession,
   startManualAssistance,
   subscribeManualAssistanceEvents,
 } from "./manual-assistance-client";
@@ -62,6 +63,12 @@ describe("manual assistance IPC client", () => {
       "Invalid manual assistance request identifier",
     );
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("invokes the Rust session reset command", async () => {
+    await resetManualAssistanceSession();
+
+    expect(invokeMock).toHaveBeenCalledWith("reset_session");
   });
 
   it("delivers valid events, ignores malformed events, and normalizes unknown failures", async () => {

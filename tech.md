@@ -94,9 +94,11 @@ external APIs. Domain types do not know React, individual providers, SQLite, xca
 WASAPI.
 
 The current vertical slice contains application status and manual text assistance. Manual
-requests pass through narrow Tauri commands to a Rust application service, which loads
-selected context and uses a provider-independent request through the configured router.
-Future directories are created when code exists for them.
+requests pass through narrow Tauri commands to a Rust session service, which loads selected
+context and sends bounded role-tagged conversation history through the configured
+provider-independent router. One process-local session keeps successful turns and a rolling
+summary until reset or application restart. Future directories are created when code exists
+for them.
 
 ## 6. Frontend responsibilities
 
@@ -104,7 +106,8 @@ React owns:
 
 - semantic, accessible presentation;
 - local interaction and focused UI state;
-- the manual request composer and incremental rendering of backend event streams;
+- the manual request composer, incremental rendering of backend event streams, and a new
+  session action that clears the visible conversation only after Rust confirms reset;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -127,12 +130,14 @@ Rust owns:
 - image preprocessing and system shortcuts;
 - safe error mapping and structured technical logging.
 
-Rust exposes `get_app_status` and three manual-assistance commands for readiness, request
-start, and cancellation. The service validates text, selects context, permits one active
+Rust exposes `get_app_status` and four manual-assistance commands for readiness, request
+start, cancellation, and session reset. `SessionService` validates text, selects relevant
+static context, composes bounded system and role-tagged conversation messages, summarizes
+older completed turns through the existing router when limits require it, permits one active
 request, and returns typed failures. Provider networking, context loading, configuration,
-and credential lookup stay in Rust. Startup uses `expect` only for the invariant that a
-Tauri application must initialize to run; runtime or user-controlled operations return
-typed errors.
+credential lookup, session state, and cancellation stay in Rust. Startup uses `expect` only
+for the invariant that a Tauri application must initialize to run; runtime or user-controlled
+operations return typed errors.
 
 ## 8. Security boundaries
 
@@ -143,10 +148,12 @@ HTTP proxy, or SQL endpoint.
 
 Tauri capabilities grant only application commands declared in the Rust build manifest;
 the main window receives `allow-get-app-status`, `allow-get-manual-assistance-readiness`,
-`allow-start-manual-assistance`, and `allow-cancel-manual-assistance`, with no plugin
-permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
-logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
-development only; OS-backed credential storage remains future security work.
+`allow-start-manual-assistance`, `allow-cancel-manual-assistance`, and
+`allow-reset-session`, plus `core:event:allow-listen` and `core:event:allow-unlisten` for the
+streaming UI. It receives no plugin permissions. Provider keys never enter Vite environment
+variables, localStorage,
+Zustand, logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for
+local development only; OS-backed credential storage remains future security work.
 
 Sensitive content is excluded from logs by default. API keys, authorization headers, raw
 audio, screenshots, full context packs, and full provider payloads must not be logged.
@@ -190,25 +197,35 @@ Context selection is layered:
 
 The current deterministic selector preserves manifest order and includes `always_include`
 documents plus documents whose configured complete keyword or phrase occurs in normalized
-manual input. It avoids sending non-matching documents. Intent classification and rolling
-session context remain later work.
+manual input. It avoids sending non-matching documents. A Rust-owned session also includes
+prior successful user and assistant messages in chronological order and automatically
+compacts older turns into a rolling summary when recent history exceeds either bound. The
+current request is the final user message; the summary and selected static documents are
+placed in the system prompt. Image, audio, transcript, and other unsupported inputs do not
+enter the session in this stage.
 
 ## 11. Session architecture
 
-A session will contain metadata, transcript entries, events, attachment references,
-rolling summary, model interactions, and selected context. Events have stable IDs, a
-session ID, UTC timestamp, source, kind, and payload metadata. Candidate kinds include
-speech boundaries, transcripts, captures, user input, assistant requests/responses,
-context updates, summaries, and errors.
+One process-local `SessionService` owns a generated session ID, `Idle`/`Active`/`Processing`
+lifecycle, completed manual-text exchanges, a rolling summary, and the active request's
+cancellation token under one state lock. Only successfully completed exchanges enter model
+context. A failure or cancellation leaves prior turns available and excludes any partial
+answer. Reset is rejected while processing; otherwise it clears recent turns and summary
+and returns to an idle session with a fresh ID. A process restart also begins with an empty
+session.
 
-The design is event-oriented but not a full event-sourcing framework. The session
-orchestrator will have a clear state owner and explicit states such as idle, starting,
-active, processing, stopping, and failed. Long-running provider, transcription, and image
-operations must eventually support cancellation. Blocking and CPU-heavy work must not run
-on async runtime threads.
+Current manual input is capped at 16 KiB. Recent history is capped at 8 exchanges and
+16 KiB, the system context at 20 KiB, the rolling summary at 4 KiB, each retained assistant
+answer at 16 KiB, and summary-request system plus conversation text at 64 KiB. Limits count
+UTF-8 bytes. When needed, Rust stages oldest-turn summaries through the existing router and
+replaces the stored summary and removed turns only after every required summary call
+succeeds. Context pack loading runs on a blocking worker; provider and summary calls honor
+request cancellation.
 
-No session lifecycle or event persistence is implemented in Phase 0; the UI truthfully
-shows an idle placeholder.
+The session is deliberately volatile and has no event or chat-history persistence. It
+does not introduce multiple chats, SQLite, image or audio inputs, transcription, or response
+modes. Future session event records may use stable IDs, timestamps, source, and kind, but a
+durable event log is not part of the current implementation.
 
 ## 12. Storage plan
 
@@ -218,7 +235,8 @@ repository layer. Screenshots and audio will use file storage plus references wh
 explicitly choose persistence; large media is not stored as SQLite blobs by default.
 
 The SQLite library and migration approach will be chosen in Phase 5 and recorded in an
-ADR. No database crate or runtime storage exists in Phase 0.
+ADR. No database crate or durable runtime storage exists; the implemented manual-text
+session remains volatile and in memory.
 
 ## 13. Audio plan
 
@@ -249,8 +267,9 @@ cost reduction. Screenshot capture is not implemented in Phase 0.
   duplicate submission, keyboard behavior, cancellation, failure recovery, and focus.
 - Rust domain and application behavior uses unit and integration tests.
 - The OpenRouter adapter uses a local mock HTTP server for request mapping, SSE parsing,
-  provider error classification, timeout, and cancellation. Automated tests need no API key
-  and make no provider calls.
+  provider error classification, timeout, and cancellation. Session tests use a fake router
+  for follow-up context, bounds and summaries, relevance filtering, reset, cancellation, and
+  recovery after failures. Automated tests need no API key and make no provider calls.
 - Tests protect observable behavior, not private structure or prose.
 - CI runs formatting, linting, type checking, tests, and builds for the current foundation.
 
@@ -394,7 +413,10 @@ response-mode behavior, cancellation, and integration tests.
 **Acceptance criteria:** One active session combines supported inputs; irrelevant static
 context is excluded; cancellation is reliable; lifecycle/error states are explicit.
 
-**Status:** Not started
+**Status:** In progress — the manual-text session has bounded role-tagged history, automatic
+static-context selection, provider-mediated rolling summaries, lifecycle reset, and
+cancellation/error coverage. Screenshot and transcript composition, response modes, and
+other unsupported inputs remain unimplemented.
 
 ### Phase 5 — Persistence and context management
 
@@ -456,18 +478,24 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 - Strict React/TypeScript/Vite/Tailwind frontend with focused Zustand stores.
 - Accessible desktop shell with a manual text composer, streaming response, cancellation,
   readiness guidance, safe failures, keyboard handling, and focus restoration.
-- Responsive frontend conversation view with Markdown/code formatting and ephemeral
-  prompt/response turns; previous turns stay visible but are not sent in later requests.
+- Responsive frontend conversation view with Markdown/code formatting and an ephemeral
+  transcript; completed turns are sent as bounded role-tagged context for follow-up requests.
+- A single in-memory Rust session with automatic current-input relevance filtering, bounded
+  recent exchanges and system context, rolling summaries through the existing router, and a
+  reset lifecycle that rejects active requests.
+- Accessible **New session** action that waits for Rust reset confirmation before clearing
+  visible turns and preserves the conversation with a safe error if reset fails.
 - Typed clients for application status and manual-assistance IPC; unknown event payloads are
   validated at runtime and stale request IDs are ignored.
-- Rust application-status service and manual-assistance coordinator with one active request.
+- Rust application-status service and `SessionService` with one active request.
 - Versioned context-pack validation, safe Markdown loading, deterministic selection, and
   bounded prompt construction.
 - Typed OpenRouter configuration, Rust-only environment secret lookup, provider-independent
   text-generation ports, router, streaming adapter, timeout, cancellation, and safe failure
   classification.
-- Explicit permissions for the four implemented commands, no Tauri plugin permissions,
-  and a production content security policy without `unsafe-inline`.
+- Explicit permissions for the five implemented application commands and event listening
+  and cleanup, no Tauri plugin permissions, and a production content security policy without
+  `unsafe-inline`.
 - Fictional context-pack example, OpenRouter setup instructions, and a focused provider and
   credential-boundary ADR.
 - Frontend behavior test, formatting, lint, type checking, build scripts, and CI.
@@ -477,9 +505,9 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 
 ### Architecturally planned, not implemented
 
-Additional provider adapters, OS-backed credential storage, sessions, screenshots, audio,
-VAD, transcription, SQLite, history, shortcuts, tray, compact mode, updater, signing, and
-production packaging.
+Additional provider adapters, OS-backed credential storage, multiple chats, persisted
+session history, screenshots, audio, VAD, transcription, SQLite, history management,
+shortcuts, tray, compact mode, updater, signing, and production packaging.
 
 ### Phase 0 validation record
 
@@ -506,6 +534,18 @@ has not been verified in this workspace, so Phase 1 remains in progress.
 | Tauri development startup                                                             | Built and started the native binary with provider configuration explicitly unset        |
 | Live OpenRouter request                                                               | Not run; `OPENROUTER_API_KEY` was not configured in the shell environment               |
 
+### Session intelligence validation record
+
+This stage adds one volatile manual-text session. It does not complete Phase 4: screenshot
+and transcript inputs, multimodal composition, and response modes remain planned. All
+provider tests use local mocks or a fake router; no live OpenRouter call is required.
+
+| Check                               | Result                                                                                                               |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Rust backend tests                  | Passed: 66 tests, including follow-up, bounds, compaction, relevance, reset, cancellation, and recovery              |
+| Frontend reset and transcript tests | Passed: 14 targeted tests covering reset IPC, success ordering, busy state, and failure preservation                 |
+| Full project `pnpm check`           | Passed on 2026-09-25: 17 frontend tests, 66 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check |
+
 ### Toolchain and tested versions
 
 The project requires Node.js 24 LTS, pnpm 12.5.1, and Rust 1.98.0. Exact JavaScript and
@@ -529,6 +569,7 @@ current stable compatible direct versions:
 - [ADR 0001: Tauri desktop architecture](docs/adr/0001-tauri-desktop-architecture.md)
 - [ADR 0002: Provider-neutral application boundary](docs/adr/0002-provider-neutral-application-boundary.md)
 - [ADR 0003: OpenRouter and the manual-assistance trust boundary](docs/adr/0003-openrouter-manual-assistance-boundary.md)
+- [ADR 0004: Ephemeral session context and Rust-owned lifecycle](docs/adr/0004-ephemeral-session-context.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform

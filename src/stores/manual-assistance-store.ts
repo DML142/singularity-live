@@ -3,6 +3,7 @@ import { create } from "zustand";
 import {
   cancelManualAssistance,
   getManualAssistanceReadiness,
+  resetManualAssistanceSession,
   startManualAssistance,
   subscribeManualAssistanceEvents,
   type ManualAssistanceEvent,
@@ -38,12 +39,15 @@ interface ManualAssistanceState {
   readonly answer: string;
   readonly error: string | null;
   readonly cancelPending: boolean;
+  readonly resetPending: boolean;
+  readonly resetError: string | null;
   readonly turns: readonly ManualAssistanceTurn[];
   readonly activeTurnId: number | null;
   readonly loadReadiness: () => Promise<void>;
   readonly initialize: () => Promise<() => void>;
   readonly start: (text: string) => Promise<void>;
   readonly cancel: () => Promise<void>;
+  readonly resetSession: () => Promise<void>;
   readonly handleEvent: (event: ManualAssistanceEvent) => void;
 }
 
@@ -182,6 +186,8 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
   answer: "",
   error: null,
   cancelPending: false,
+  resetPending: false,
+  resetError: null,
   turns: [],
   activeTurnId: null,
   loadReadiness: async () => {
@@ -215,7 +221,11 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
     }
   },
   start: async (text) => {
-    if (get().phase === "starting" || get().phase === "streaming") {
+    if (
+      get().phase === "starting" ||
+      get().phase === "streaming" ||
+      get().resetPending
+    ) {
       return;
     }
     bufferedEvents = [];
@@ -227,6 +237,7 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
       answer: "",
       error: null,
       cancelPending: false,
+      resetError: null,
       activeTurnId: turnId,
       turns: [
         ...get().turns,
@@ -315,6 +326,41 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
         });
       }
     }
+  },
+  resetSession: async () => {
+    const state = get();
+    if (
+      state.phase === "starting" ||
+      state.phase === "streaming" ||
+      state.resetPending
+    ) {
+      return;
+    }
+
+    set({ resetPending: true, resetError: null });
+    try {
+      await resetManualAssistanceSession();
+    } catch {
+      set({
+        resetPending: false,
+        resetError: "The session could not be reset. Try again.",
+      });
+      return;
+    }
+
+    bufferedEvents = [];
+    nextTurnId = 1;
+    set({
+      phase: "idle",
+      requestId: null,
+      answer: "",
+      error: null,
+      cancelPending: false,
+      resetPending: false,
+      resetError: null,
+      turns: [],
+      activeTurnId: null,
+    });
   },
   handleEvent: (event) => {
     if (retiredRequestIds.has(event.requestId)) {
