@@ -62,6 +62,11 @@ impl SessionHistory {
 
     #[must_use]
     pub fn next_summary_batch(&self) -> Option<SummaryBatch> {
+        if self.recent_turns.len() <= MAX_RECENT_EXCHANGES
+            && self.recent_turn_bytes() <= MAX_RECENT_HISTORY_BYTES
+        {
+            return None;
+        }
         let required_count = (1..=self.recent_turns.len()).find(|prefix_count| {
             let remaining = self.recent_turns.iter().skip(*prefix_count);
             let remaining_count = self.recent_turns.len() - *prefix_count;
@@ -93,15 +98,22 @@ impl SessionHistory {
     }
 
     #[must_use]
-    #[cfg(test)]
     pub(crate) fn recent_turn_bytes(&self) -> usize {
         self.recent_turns.iter().map(SessionTurn::byte_len).sum()
     }
 
     #[must_use]
-    #[cfg(test)]
     pub(crate) fn rolling_summary(&self) -> Option<&str> {
         self.rolling_summary.as_deref()
+    }
+
+    pub(crate) fn append_completed(&mut self, user_text: String, assistant_text: String) {
+        self.recent_turns
+            .push_back(SessionTurn::new(user_text, assistant_text));
+    }
+
+    pub(crate) fn has_context(&self) -> bool {
+        self.rolling_summary.is_some() || !self.recent_turns.is_empty()
     }
 
     fn render_summary_request(&self, turn_count: usize) -> String {
@@ -140,7 +152,7 @@ impl SummaryBatch {
     }
 }
 
-fn truncate_to_bytes(value: &str, max_bytes: usize) -> &str {
+pub(crate) fn truncate_to_bytes(value: &str, max_bytes: usize) -> &str {
     if value.len() <= max_bytes {
         return value;
     }
@@ -198,6 +210,13 @@ mod tests {
                 .expect("summary exists")
                 .contains("Earlier intent")
         );
+    }
+
+    #[test]
+    fn history_within_recent_limits_does_not_create_a_summary_batch() {
+        let history = SessionHistory::from_turns(vec![SessionTurn::new("question", "answer")]);
+
+        assert!(history.next_summary_batch().is_none());
     }
 
     #[test]
@@ -279,10 +298,16 @@ mod tests {
                 )
             })
             .collect();
-        let history = SessionHistory::from_turns(turns);
-        let batch = history
-            .next_summary_batch()
-            .expect("old exchanges require compaction");
-        assert!(batch.system_prompt().len() + batch.request_text().len() <= 64 * 1024);
+        let mut history = SessionHistory::from_turns(turns);
+        let mut batch_count = 0;
+        while let Some(batch) = history.next_summary_batch() {
+            assert!(batch.system_prompt().len() + batch.request_text().len() <= 64 * 1024);
+            history.apply_summary_batch(batch, "Earlier intent remains active.".to_owned());
+            batch_count += 1;
+        }
+
+        assert!(batch_count > 1);
+        assert!(history.recent_turn_count() <= 8);
+        assert!(history.recent_turn_bytes() <= 16 * 1024);
     }
 }

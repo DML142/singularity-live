@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{
-    app::{ManualAssistanceError, ManualAssistanceReadiness, ManualAssistanceService},
+    app::{ManualAssistanceError, ManualAssistanceReadiness, SessionService},
     domain::{ProviderError, ProviderErrorKind, ProviderId, RequestId, StreamEvent, Usage},
     providers::StreamSink,
 };
@@ -162,7 +162,7 @@ impl StreamSink for TauriEventSink {
 
 #[tauri::command]
 pub async fn get_manual_assistance_readiness(
-    service: State<'_, Arc<ManualAssistanceService>>,
+    service: State<'_, Arc<SessionService>>,
 ) -> Result<ReadinessDto, CommandError> {
     let service = Arc::clone(service.inner());
     tokio::task::spawn_blocking(move || ReadinessDto::from(service.readiness()))
@@ -176,7 +176,7 @@ pub async fn get_manual_assistance_readiness(
 #[tauri::command]
 pub async fn start_manual_assistance(
     request: ManualRequestPayload,
-    service: State<'_, Arc<ManualAssistanceService>>,
+    service: State<'_, Arc<SessionService>>,
     app: AppHandle,
 ) -> Result<StartManualAssistanceResponse, CommandError> {
     let sink = Arc::new(TauriEventSink { app });
@@ -192,7 +192,7 @@ pub async fn start_manual_assistance(
 #[tauri::command]
 pub async fn cancel_manual_assistance(
     request: CancelManualRequestPayload,
-    service: State<'_, Arc<ManualAssistanceService>>,
+    service: State<'_, Arc<SessionService>>,
 ) -> Result<(), CommandError> {
     let CancelManualRequestPayload { request_id } = request;
     let request_id = RequestId::parse(&request_id).map_err(|_| CommandError {
