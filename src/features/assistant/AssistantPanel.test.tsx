@@ -127,6 +127,17 @@ describe("manual assistant panel", () => {
     });
   });
 
+  it("focuses screen help when launched with the screenshot task preset", async () => {
+    render(<AssistantPanel initialTask="screenshot" />);
+    const screenAssistance = await screen.findByRole("region", {
+      name: "Screen assistance",
+    });
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screenAssistance);
+    });
+  });
+
   it("renders streamed text, ignores stale events, and restores focus on completion", async () => {
     let resolveStart: ((requestId: string) => void) | undefined;
     client.start.mockReturnValue(

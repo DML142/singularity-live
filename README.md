@@ -1,21 +1,25 @@
 # Singularity Live
 
-Singularity Live is a desktop context copilot for working with live conversation, screen
-context, persistent user context, and configurable AI providers. The app now supports
-manual text assistance through OpenRouter, with context packs loaded by Rust from the
-application data directory. Audio, screenshots, session history, and persistent credential
-storage remain future work; the implementation record is in [tech.md](tech.md).
+Singularity Live is a desktop context copilot for manual text and temporary screenshot
+assistance through OpenRouter, with context packs loaded by Rust from the application data
+directory. Global screenshot shortcuts can be configured in Settings → Binds. Audio, live
+conversation, session history, and persistent credential storage remain future work; the
+implementation record is in [tech.md](tech.md).
 
 ## Current status
 
-The desktop foundation and manual context/provider path are implemented. The provider path
-has automated coverage; a live OpenRouter request has not been verified in this workspace.
-The roadmap status and validation evidence are recorded in [tech.md](tech.md).
+The desktop foundation, manual context/provider path, and transient screenshot assistance
+are implemented. Provider calls in automated checks use mocks; live OpenRouter requests are
+not sent by the test suite. Roadmap status and validation evidence are recorded in
+[tech.md](tech.md).
 
 The shell currently provides:
 
 - an honest idle workspace for session and transcript areas, plus a manual request composer;
 - backend readiness loaded through a typed Tauri IPC command;
+- temporary screen assistance from the assistant or a configurable global shortcut;
+- an always-on-top main window and a Rust-owned capture, permission, and image lifecycle;
+- a Binds settings view for adding and recording screenshot shortcuts;
 - Rust-owned context loading, provider configuration, credentials, routing, and streaming;
 - safe setup guidance when OpenRouter or the configured context pack is unavailable;
 - exact Tauri permissions for status, readiness, start, and cancel commands.
@@ -62,6 +66,23 @@ Run the desktop application with the real Rust IPC boundary:
 ```bash
 pnpm tauri dev
 ```
+
+For an interactive development launcher that offers the available assistance workflows and
+asks for a missing OpenRouter key without echoing or saving it:
+
+```sh
+pnpm assist
+```
+
+With arguments, the launcher skips prompts and requires the key in the environment. It never
+accepts the key as an argument:
+
+```sh
+export OPENROUTER_API_KEY='…'
+pnpm assist -- --task screenshot --context-pack fictional-developer
+```
+
+The direct `pnpm tauri dev` command remains available and unchanged.
 
 ## Manual text assistance
 
@@ -146,8 +167,10 @@ belong in Rust behind narrow typed commands. The environment-backed credential s
 for local development; React never receives provider keys and does not call model providers
 directly.
 
-Raw audio and screenshots are planned to be transient by default. Capture will never
-start silently on launch, and no stealth or screen-capture-evasion behavior is in scope.
+Screenshots stay in Rust's bounded in-memory store and expire after five minutes. Capture
+starts only after the user presses a configured shortcut or the in-app capture control; the
+app never captures in the background or sends an image automatically. Audio remains future
+work.
 
 Read [tech.md](tech.md) for the full architecture, roadmap, and current implementation
 status. Significant decisions are recorded under [`docs/adr`](docs/adr).

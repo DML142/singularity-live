@@ -148,3 +148,12 @@ fn reports_an_atomic_write_failure_without_mutating_existing_config() {
         original
     );
 }
+
+#[test]
+fn unavailable_config_directory_fails_without_using_the_working_directory() {
+    let store = ShortcutConfigStore::unavailable(ShortcutPlatform::Windows);
+    let bindings = ShortcutBindings::defaults(ShortcutPlatform::Windows);
+
+    assert!(store.load().is_err());
+    assert!(store.save(&bindings).is_err());
+}

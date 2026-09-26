@@ -5,6 +5,12 @@ use capture::{ScreenCaptureService, TransientImageStore, platform_capture_backen
 use config::{AppConfig, EnvironmentConfigSource};
 use providers::ProviderRouter;
 use secrets::EnvironmentSecretStore;
+use shortcuts::capture_coordinator::{
+    HotkeyCaptureCoordinator, TauriCaptureWindow, TauriHotkeyCaptureEventSink,
+};
+use shortcuts::{
+    ShortcutBindingService, ShortcutConfigStore, ShortcutPlatform, platform_shortcut_registrar,
+};
 use tauri::Manager;
 
 pub mod app;
@@ -26,6 +32,7 @@ pub mod shortcuts;
 /// without its desktop runtime.
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|application| {
             let service = match application.path().app_data_dir() {
                 Ok(app_data_directory) => session_service(&app_data_directory),
@@ -33,12 +40,65 @@ pub fn run() {
                     "The application data directory is unavailable".to_owned(),
                 )),
             };
-            application.manage(service);
-            application.manage(Arc::new(ScreenCaptureService::new(
+            application.manage(Arc::clone(&service));
+            let captures = Arc::new(ScreenCaptureService::new(
                 platform_capture_backend(),
                 Arc::new(TransientImageStore::default()),
-            )));
+            ));
+            application.manage(Arc::clone(&captures));
+            let window = application.get_webview_window("main").ok_or_else(|| {
+                std::io::Error::other("The main application window is unavailable")
+            })?;
+            window.set_always_on_top(true)?;
+            let manual_session = Arc::clone(&service);
+            let coordinator = Arc::new(HotkeyCaptureCoordinator::new(
+                captures,
+                Arc::new(TauriCaptureWindow::new(window)),
+                Arc::new(TauriHotkeyCaptureEventSink::new(
+                    application.handle().clone(),
+                )),
+                Arc::new(move || manual_session.has_active_request()),
+            ));
+            application.manage(Arc::clone(&coordinator));
+            let shortcut_store = application
+                .path()
+                .app_config_dir()
+                .or_else(|_| application.path().app_data_dir())
+                .map_or_else(
+                    |_| ShortcutConfigStore::unavailable(ShortcutPlatform::current()),
+                    |directory| {
+                        ShortcutConfigStore::new(
+                            directory.join("shortcut-bindings.json"),
+                            ShortcutPlatform::current(),
+                        )
+                    },
+                );
+            let shortcut_coordinator = Arc::clone(&coordinator);
+            let activation = Arc::new(move || {
+                let coordinator = Arc::clone(&shortcut_coordinator);
+                tauri::async_runtime::spawn(async move {
+                    coordinator.capture_from_hotkey().await;
+                });
+            });
+            let registrar = platform_shortcut_registrar(application.handle().clone(), activation);
+            let bindings = Arc::new(ShortcutBindingService::new(
+                Arc::new(shortcut_store),
+                registrar,
+            ));
+            application.manage(Arc::clone(&bindings));
+            tauri::async_runtime::spawn(async move {
+                let _ = bindings.initialize().await;
+            });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. })
+                && let Some(coordinator) = window
+                    .app_handle()
+                    .try_state::<Arc<HotkeyCaptureCoordinator>>()
+            {
+                coordinator.cancel_active();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::application_status::get_app_status,
@@ -53,6 +113,8 @@ pub fn run() {
             commands::screen_assistance::crop_screen_capture,
             commands::screen_assistance::discard_screen_capture,
             commands::screen_assistance::start_screenshot_assistance,
+            commands::shortcuts::get_shortcut_bindings,
+            commands::shortcuts::update_shortcut_bindings,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime must initialize for the application to start");

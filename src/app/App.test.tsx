@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -49,7 +49,10 @@ describe("application shell", () => {
         "Ask about the text you are working on. Relevant context is added automatically.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Binds" }),
+    ).toBeInTheDocument();
   });
 
   it("reports an unavailable backend when IPC returns a malformed payload", async () => {

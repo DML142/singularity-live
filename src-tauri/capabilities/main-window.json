@@ -16,6 +16,8 @@
     "allow-crop-screen-capture",
     "allow-discard-screen-capture",
     "allow-start-screenshot-assistance",
+    "allow-get-shortcut-bindings",
+    "allow-update-shortcut-bindings",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

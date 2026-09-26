@@ -111,6 +111,8 @@ React owns:
   session action that clears the visible conversation only after Rust confirms reset;
 - visible screen-assistance capability and permission states, explicit source selection and
   capture, temporary preview/crop, and separate send or discard actions;
+- explicit shortcut-binding edits and chord recording, plus hotkey-capture preview/error
+  presentation;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -130,12 +132,15 @@ Rust owns:
 - filesystem and platform paths;
 - audio and screen capture;
 - persistence and context loading;
-- image preprocessing and system shortcuts;
+- image preprocessing, versioned shortcut settings, native shortcut registration,
+  cursor-to-monitor resolution, and capture-window lifecycle;
 - safe error mapping and structured technical logging.
 
 Rust exposes `get_app_status`, the manual-assistance commands, and narrow screen-assistance
 commands for capability reporting, target listing, explicit capture, capture cancellation,
-crop, discard, and screenshot-assisted requests. `SessionService` validates text, selects
+crop, discard, and screenshot-assisted requests. It also exposes typed
+`get_shortcut_bindings` and `update_shortcut_bindings` commands; the global shortcut callback
+is native-only and unavailable to the webview. `SessionService` validates text, selects
 relevant static context, composes bounded system and role-tagged conversation messages,
 summarizes older completed turns through the existing router when limits require it, permits
 one active request, and returns typed failures. Capture, image processing, provider
@@ -152,10 +157,11 @@ be narrow and typed—never a generic action dispatcher, filesystem gateway, she
 HTTP proxy, or SQL endpoint.
 
 Tauri capabilities grant only application commands declared in the Rust build manifest;
-the main window receives the five application and manual-assistance permissions and the
-screen commands `get_screen_capture_capabilities`, `list_screen_capture_targets`,
+the main window receives application and manual-assistance permissions, the screen commands
+`get_screen_capture_capabilities`, `list_screen_capture_targets`,
 `start_screen_capture`, `cancel_screen_capture`, `crop_screen_capture`,
-`discard_screen_capture`, and `start_screenshot_assistance`. It also receives
+`discard_screen_capture`, and `start_screenshot_assistance`, and the shortcut settings
+commands `get_shortcut_bindings` and `update_shortcut_bindings`. It also receives
 `core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
 permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
 logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
@@ -403,6 +409,30 @@ previous text request plus screenshot through the provider boundary, safe errors
 cancellation. Full project checks passed on 2026-09-26; automated validation used neither
 live provider requests nor real screen captures.
 
+### Phase 2.5 — Global screenshot shortcuts and Binds settings
+
+**Goal:** Let users explicitly start the existing transient screenshot flow with configurable
+global shortcuts while the application is running.
+
+**Scope:** Rust-owned shortcut registration and versioned non-secret bind settings; a Binds
+view for recording, clearing, adding, removing, and saving screenshot shortcuts; monitor-under-
+pointer capture on native desktops and the existing consent-driven source picker on Wayland;
+always-on-top hide/capture/restore coordination; and an optional development launcher.
+
+**Out of scope:** Audio, VAD, transcription, OCR, persistent screenshot data, stored API keys,
+tray or launch-at-login behavior, and actions other than Screenshot.
+
+**Acceptance criteria:** Global capture works while the app is active or minimized; the app is
+excluded from the image and returns above other windows; binding edits validate and roll back
+safely; preview remains temporary and is sent only by explicit user action; the dev launcher
+does not echo or persist credentials; automated tests pass; and manual desktop smoke checks
+pass on supported operating systems.
+
+**Status:** In progress — implementation and automated validation are complete. Manual desktop
+smoke checks for active/minimized activation, always-on-top restore, capture without
+self-inclusion, and platform permission flows have not yet been recorded. Phase 3 remains
+`Not started`; Phase 4 remains `In progress`.
+
 ### Phase 3 — Audio and transcription
 
 **Goal:** Convert explicit microphone and supported system audio into low-latency transcript
@@ -515,6 +545,11 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 - Rust-only platform capture adapters, bounded image preparation, a five-minute transient
   image store, request-scoped image parts through the provider-neutral router, and an
   OpenRouter still-image mapping that preserves text-only request compatibility.
+- Versioned non-secret shortcut bindings, transactional native shortcut registration and
+  Wayland portal integration, monitor-under-pointer capture coordination, an always-on-top
+  window lifecycle, and the Settings → Binds view with transient hotkey previews.
+- A development-only interactive/argument launcher that passes credentials only to the
+  spawned process without echoing or persisting them.
 - Typed clients for application status and manual-assistance IPC; unknown event payloads are
   validated at runtime and stale request IDs are ignored.
 - Rust application-status service and `SessionService` with one active request.
@@ -536,8 +571,8 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 ### Architecturally planned, not implemented
 
 Additional provider adapters, OS-backed credential storage, multiple chats, persisted
-session history, audio, VAD, transcription, OCR, SQLite, history management, shortcuts, tray,
-compact mode, updater, signing, and production packaging.
+session history, audio, VAD, transcription, OCR, SQLite, history management, tray, compact
+mode, updater, signing, and production packaging.
 
 ### Phase 0 validation record
 
@@ -571,11 +606,24 @@ This stage adds one volatile manual-text session. It does not complete Phase 4: 
 multimodal composition, transcript inputs, and response modes remain planned. All provider
 tests use local mocks or a fake router; no live OpenRouter call is required.
 
-| Check                               | Result                                                                                                               |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Rust backend tests                  | Passed: 66 tests, including follow-up, bounds, compaction, relevance, reset, cancellation, and recovery              |
-| Frontend reset and transcript tests | Passed: 14 targeted tests covering reset IPC, success ordering, busy state, and failure preservation                 |
-| Full project `pnpm check`           | Passed on 2026-09-25: 17 frontend tests, 66 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check |
+| Check                               | Result                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Rust backend tests                  | Passed: 66 tests, including follow-up, bounds, compaction, relevance, reset, cancellation, and recovery |
+| Frontend reset and transcript tests | Passed: 14 targeted tests covering reset IPC, success ordering, busy state, and failure preservation    |
+
+### Global shortcut and developer launcher validation record
+
+Automated checks use mock shortcut registrars, capture backends, portal sessions, and local
+provider fixtures. They do not capture the desktop or make live provider requests. The
+manual desktop smoke criteria remain outstanding.
+
+| Check                                          | Result                                                                                                               |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Frontend format, lint, typecheck, tests, build | Passed on 2026-09-27: 42 tests across 10 files                                                                       |
+| Rust format, Clippy, tests, and check          | Passed on 2026-09-27: 119 tests and `cargo check`                                                                    |
+| Tauri development startup                      | Started on Linux Wayland with provider configuration and `OPENROUTER_API_KEY` unset                                  |
+| Desktop smoke on supported operating systems   | Not run: active/minimized shortcut, always-on-top, self-exclusion, and permission flow                               |
+| Full project `pnpm check`                      | Passed on 2026-09-25: 17 frontend tests, 66 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check |
 
 ### Screen assistance validation record
 
@@ -613,6 +661,8 @@ current stable compatible direct versions:
 - [ADR 0002: Provider-neutral application boundary](docs/adr/0002-provider-neutral-application-boundary.md)
 - [ADR 0003: OpenRouter and the manual-assistance trust boundary](docs/adr/0003-openrouter-manual-assistance-boundary.md)
 - [ADR 0004: Ephemeral session context and Rust-owned lifecycle](docs/adr/0004-ephemeral-session-context.md)
+- [ADR 0005: Ephemeral screen assistance and provider-neutral image requests](docs/adr/0005-ephemeral-screen-assistance.md)
+- [ADR 0006: Global screenshot shortcuts and Rust-owned capture lifecycle](docs/adr/0006-global-screenshot-shortcuts.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform

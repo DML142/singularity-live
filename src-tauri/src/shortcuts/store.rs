@@ -61,7 +61,7 @@ struct VersionedShortcutConfig {
 }
 
 pub struct ShortcutConfigStore {
-    path: PathBuf,
+    path: Option<PathBuf>,
     platform: ShortcutPlatform,
     writer: Arc<dyn AtomicConfigWriter>,
 }
@@ -79,9 +79,18 @@ impl ShortcutConfigStore {
         writer: Arc<dyn AtomicConfigWriter>,
     ) -> Self {
         Self {
-            path: path.into(),
+            path: Some(path.into()),
             platform,
             writer,
+        }
+    }
+
+    #[must_use]
+    pub fn unavailable(platform: ShortcutPlatform) -> Self {
+        Self {
+            path: None,
+            platform,
+            writer: Arc::new(TemporaryFileConfigWriter),
         }
     }
 
@@ -91,7 +100,12 @@ impl ShortcutConfigStore {
     ///
     /// Returns a safe error for malformed, unsupported, invalid, or inaccessible config.
     pub fn load(&self) -> Result<Vec<ShortcutBinding>, BindingStoreError> {
-        let contents = match fs::read(&self.path) {
+        let Some(path) = &self.path else {
+            return Err(BindingStoreError::Read(io::Error::other(
+                "application config directory unavailable",
+            )));
+        };
+        let contents = match fs::read(path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Ok(ShortcutBindings::defaults(self.platform));
@@ -119,8 +133,13 @@ impl ShortcutConfigStore {
             bindings: bindings.to_vec(),
         };
         let contents = serde_json::to_vec(&config).map_err(BindingStoreError::Parse)?;
+        let Some(path) = &self.path else {
+            return Err(BindingStoreError::Write(io::Error::other(
+                "application config directory unavailable",
+            )));
+        };
         self.writer
-            .replace_atomically(&self.path, &contents)
+            .replace_atomically(path, &contents)
             .map_err(BindingStoreError::Write)
     }
 }

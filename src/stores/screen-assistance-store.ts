@@ -1,5 +1,9 @@
 import { create } from "zustand";
 
+import type {
+  HotkeyCaptureErrorKind,
+  HotkeyCaptureEvent,
+} from "../lib/tauri/hotkey-capture-client";
 import {
   cancelScreenCapture,
   cropScreenCapture,
@@ -52,6 +56,7 @@ interface ScreenAssistanceState {
   readonly send: () => Promise<void>;
   readonly clearForSessionReset: () => void;
   readonly clearOnUnmount: () => Promise<void>;
+  readonly acceptHotkeyCapture: (event: HotkeyCaptureEvent) => void;
 }
 
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -294,4 +299,53 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
       await discardScreenCapture(preview.captureId).catch(() => {});
     }
   },
+  acceptHotkeyCapture: (event) => {
+    if (event.status === "error" && event.kind === "busy") {
+      set({ error: "A screenshot action is already in progress" });
+      return;
+    }
+    stopExpiryTimer();
+    if (event.status === "error") {
+      set({
+        phase: event.kind === "cancelled" ? "cancelled" : "failed",
+        preview: null,
+        operationId: null,
+        error: hotkeyCaptureErrorMessage(event.kind),
+      });
+      return;
+    }
+    const preview = event.preview;
+    set({ phase: "preview", operationId: null, preview, error: null });
+    expiryTimer = setTimeout(
+      () => {
+        if (get().preview?.captureId !== preview.captureId) {
+          return;
+        }
+        set({
+          phase: "expired",
+          preview: null,
+          error: "The screenshot expired. Capture it again to continue.",
+        });
+        void discardScreenCapture(preview.captureId).catch(() => {});
+      },
+      Math.max(0, preview.expiresInSeconds * 1000),
+    );
+  },
 }));
+
+function hotkeyCaptureErrorMessage(kind: HotkeyCaptureErrorKind): string {
+  const errorCodes: Record<HotkeyCaptureErrorKind, string> = {
+    unsupported: "unsupported",
+    permission_required: "permissionRequired",
+    permission_denied: "permissionDenied",
+    invalid_target: "invalidTarget",
+    invalid_region: "invalidRegion",
+    image_expired: "imageExpired",
+    preparation: "preparation",
+    cancelled: "cancelled",
+    busy: "busy",
+    no_matching_capture: "noMatchingCapture",
+    unavailable: "unavailable",
+  };
+  return screenCaptureErrorMessage({ code: errorCodes[kind] });
+}

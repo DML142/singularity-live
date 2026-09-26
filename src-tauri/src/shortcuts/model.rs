@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -53,6 +54,12 @@ impl ShortcutBindingId {
 impl Default for ShortcutBindingId {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Display for ShortcutBindingId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
     }
 }
 

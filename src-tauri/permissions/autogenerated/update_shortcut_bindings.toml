@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-shortcut-bindings"
+description = "Enables the update_shortcut_bindings command without any pre-configured scope."
+commands.allow = ["update_shortcut_bindings"]
+
+[[permission]]
+identifier = "deny-update-shortcut-bindings"
+description = "Denies the update_shortcut_bindings command without any pre-configured scope."
+commands.deny = ["update_shortcut_bindings"]

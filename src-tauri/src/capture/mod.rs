@@ -1,4 +1,5 @@
 mod backend;
+mod cursor;
 mod image;
 #[cfg(target_os = "linux")]
 mod portal;
@@ -8,6 +9,7 @@ pub use backend::{
     CaptureBackend, CaptureCapabilities, CaptureError, CaptureErrorKind, CaptureOperationId,
     CapturePermission, CaptureTarget, CaptureTargetKind, platform_capture_backend,
 };
+pub use cursor::{CursorPosition, CursorPositionProvider, MonitorBounds, MonitorResolver};
 pub use image::{CropRect, PreparedImage, prepare_image};
 pub use store::{CaptureId, CapturePreview, TransientImageStore};
 
@@ -71,7 +73,47 @@ impl ScreenCaptureService {
     ) -> Result<CapturePreview, CaptureError> {
         let cancellation = self.begin_capture(operation_id)?;
         self.images.clear();
-        let mut result = self.capture_target(target_id, cancellation.clone()).await;
+        let mut result = match self.backend.target_by_id(target_id).await {
+            Ok(target) => self.capture_target(&target, cancellation.clone()).await,
+            Err(error) => Err(error),
+        };
+        if cancellation.is_cancelled() {
+            result = Err(CaptureError::new(
+                CaptureErrorKind::Cancelled,
+                "Screen capture was cancelled",
+            ));
+        }
+        if result.is_err() {
+            self.images.clear();
+        }
+        self.finish_capture(operation_id);
+        result
+    }
+
+    /// Captures the monitor under the pointer for an explicit native shortcut action.
+    ///
+    /// # Errors
+    ///
+    /// Returns a capability, permission, target, preparation, availability, or cancellation
+    /// error. A failed capture leaves no current image in the transient store.
+    pub async fn capture_under_cursor(
+        &self,
+        operation_id: CaptureOperationId,
+        cancellation: CancellationToken,
+    ) -> Result<CapturePreview, CaptureError> {
+        let cancellation = self.begin_capture_with_token(operation_id, cancellation)?;
+        self.images.clear();
+        let mut result = if cancellation.is_cancelled() {
+            Err(CaptureError::new(
+                CaptureErrorKind::Cancelled,
+                "Screen capture was cancelled",
+            ))
+        } else {
+            match self.backend.monitor_under_cursor().await {
+                Ok(target) => self.capture_target(&target, cancellation.clone()).await,
+                Err(error) => Err(error),
+            }
+        };
         if cancellation.is_cancelled() {
             result = Err(CaptureError::new(
                 CaptureErrorKind::Cancelled,
@@ -114,6 +156,14 @@ impl ScreenCaptureService {
         &self,
         operation_id: CaptureOperationId,
     ) -> Result<CancellationToken, CaptureError> {
+        self.begin_capture_with_token(operation_id, CancellationToken::new())
+    }
+
+    fn begin_capture_with_token(
+        &self,
+        operation_id: CaptureOperationId,
+        cancellation: CancellationToken,
+    ) -> Result<CancellationToken, CaptureError> {
         let mut active = self.active_lock();
         if active.is_some() {
             return Err(CaptureError::new(
@@ -121,7 +171,6 @@ impl ScreenCaptureService {
                 "A screen capture is already in progress",
             ));
         }
-        let cancellation = CancellationToken::new();
         *active = Some(ActiveCapture {
             operation_id,
             cancellation: cancellation.clone(),
@@ -141,7 +190,7 @@ impl ScreenCaptureService {
 
     async fn capture_target(
         &self,
-        target_id: &str,
+        target: &CaptureTarget,
         cancellation: CancellationToken,
     ) -> Result<CapturePreview, CaptureError> {
         let capabilities = self.backend.capabilities().await;
@@ -163,7 +212,6 @@ impl ScreenCaptureService {
                 "Screen capture was cancelled",
             ));
         }
-        let target = self.backend.target_by_id(target_id).await?;
         if !capabilities.supports(target.kind) {
             return Err(CaptureError::new(
                 CaptureErrorKind::Unsupported,
@@ -176,7 +224,7 @@ impl ScreenCaptureService {
                 "Screen capture was cancelled",
             ));
         }
-        let pixels = self.backend.capture(&target, cancellation.clone()).await?;
+        let pixels = self.backend.capture(target, cancellation.clone()).await?;
         if cancellation.is_cancelled() {
             return Err(CaptureError::new(
                 CaptureErrorKind::Cancelled,
@@ -339,6 +387,26 @@ mod tests {
             .expect("explicit capture succeeds");
         assert_eq!(backend.capture_calls.load(Ordering::SeqCst), 1);
         assert!(preview.data_url.starts_with("data:image/png;base64,"));
+    }
+
+    #[tokio::test]
+    async fn native_shortcut_capture_uses_the_backend_monitor_under_the_cursor() {
+        let backend = std::sync::Arc::new(FakeBackend::new(capabilities()));
+        let service = ScreenCaptureService::new(
+            backend.clone(),
+            std::sync::Arc::new(TransientImageStore::default()),
+        );
+
+        let preview = service
+            .capture_under_cursor(
+                CaptureOperationId::new(),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .expect("monitor under the cursor is captured");
+
+        assert_eq!(backend.capture_calls.load(Ordering::SeqCst), 1);
+        assert_eq!((preview.width, preview.height), (2, 2));
     }
 
     #[tokio::test]

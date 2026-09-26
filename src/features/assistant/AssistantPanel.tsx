@@ -14,7 +14,11 @@ import type { CropRect } from "../../lib/tauri/screen-assistance-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
 import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
 
-export function AssistantPanel() {
+interface AssistantPanelProps {
+  readonly initialTask?: "text" | "screenshot" | undefined;
+}
+
+export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   const readiness = useManualAssistanceStore((state) => state.readiness);
   const phase = useManualAssistanceStore((state) => state.phase);
   const turns = useManualAssistanceStore((state) => state.turns);
@@ -53,6 +57,7 @@ export function AssistantPanel() {
   );
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const screenAssistanceRef = useRef<HTMLElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const screenshotImageRef = useRef<HTMLImageElement>(null);
   const cropStart = useRef<{ readonly x: number; readonly y: number } | null>(null);
@@ -95,6 +100,17 @@ export function AssistantPanel() {
     }
     previousPhase.current = phase;
   }, [phase]);
+
+  useEffect(() => {
+    if (readiness.phase !== "ready") {
+      return;
+    }
+    if (initialTask === "text") {
+      composerRef.current?.focus();
+    } else if (initialTask === "screenshot") {
+      screenAssistanceRef.current?.focus();
+    }
+  }, [initialTask, readiness.phase]);
 
   useEffect(() => {
     const conversation = conversationRef.current;
@@ -249,7 +265,12 @@ export function AssistantPanel() {
                 </p>
               ) : null}
             </div>
-            <section className="screen-assistance" aria-label="Screen assistance">
+            <section
+              className="screen-assistance"
+              aria-label="Screen assistance"
+              ref={screenAssistanceRef}
+              tabIndex={-1}
+            >
               <div className="screen-assistance-heading">
                 <div>
                   <p className="screen-assistance-title">Temporary screen help</p>
