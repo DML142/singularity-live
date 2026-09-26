@@ -5,25 +5,35 @@ mod portal;
 mod store;
 
 pub use backend::{
-    CaptureBackend, CaptureCapabilities, CaptureError, CaptureErrorKind, CapturePermission,
-    CaptureTarget, CaptureTargetKind, platform_capture_backend,
+    CaptureBackend, CaptureCapabilities, CaptureError, CaptureErrorKind, CaptureOperationId,
+    CapturePermission, CaptureTarget, CaptureTargetKind, platform_capture_backend,
 };
 pub use image::{CropRect, PreparedImage, prepare_image};
 pub use store::{CaptureId, CapturePreview, TransientImageStore};
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio_util::sync::CancellationToken;
 pub struct ScreenCaptureService {
     backend: Arc<dyn CaptureBackend>,
     images: Arc<TransientImageStore>,
+    active: Mutex<Option<ActiveCapture>>,
+}
+
+struct ActiveCapture {
+    operation_id: CaptureOperationId,
+    cancellation: CancellationToken,
 }
 
 impl ScreenCaptureService {
     /// Creates a screen-capture service with a platform adapter and transient image store.
     #[must_use]
     pub fn new(backend: Arc<dyn CaptureBackend>, images: Arc<TransientImageStore>) -> Self {
-        Self { backend, images }
+        Self {
+            backend,
+            images,
+            active: Mutex::new(None),
+        }
     }
 
     pub async fn capabilities(&self) -> CaptureCapabilities {
@@ -39,6 +49,12 @@ impl ScreenCaptureService {
         &self,
         kind: CaptureTargetKind,
     ) -> Result<Vec<CaptureTarget>, CaptureError> {
+        if !self.backend.capabilities().await.supports(kind) {
+            return Err(CaptureError::new(
+                CaptureErrorKind::Unsupported,
+                "This screen or window capture type is unavailable",
+            ));
+        }
         self.backend.targets(kind).await
     }
 
@@ -51,9 +67,83 @@ impl ScreenCaptureService {
     pub async fn capture(
         &self,
         target_id: &str,
+        operation_id: CaptureOperationId,
+    ) -> Result<CapturePreview, CaptureError> {
+        let cancellation = self.begin_capture(operation_id)?;
+        self.images.clear();
+        let mut result = self.capture_target(target_id, cancellation.clone()).await;
+        if cancellation.is_cancelled() {
+            result = Err(CaptureError::new(
+                CaptureErrorKind::Cancelled,
+                "Screen capture was cancelled",
+            ));
+        }
+        if result.is_err() {
+            self.images.clear();
+        }
+        self.finish_capture(operation_id);
+        result
+    }
+
+    /// Cancels the active screenshot operation when the identifier matches.
+    ///
+    /// # Errors
+    ///
+    /// Returns a no-matching-capture error when this operation is no longer active.
+    pub fn cancel_capture(&self, operation_id: CaptureOperationId) -> Result<(), CaptureError> {
+        let active = self.active_lock();
+        let Some(current) = active.as_ref() else {
+            return Err(no_matching_capture_error());
+        };
+        if current.operation_id != operation_id {
+            return Err(no_matching_capture_error());
+        }
+        current.cancellation.cancel();
+        Ok(())
+    }
+
+    /// Cancels any active screenshot operation and clears its transient preview.
+    pub fn clear(&self) {
+        if let Some(active) = self.active_lock().as_ref() {
+            active.cancellation.cancel();
+        }
+        self.images.clear();
+    }
+
+    fn begin_capture(
+        &self,
+        operation_id: CaptureOperationId,
+    ) -> Result<CancellationToken, CaptureError> {
+        let mut active = self.active_lock();
+        if active.is_some() {
+            return Err(CaptureError::new(
+                CaptureErrorKind::Busy,
+                "A screen capture is already in progress",
+            ));
+        }
+        let cancellation = CancellationToken::new();
+        *active = Some(ActiveCapture {
+            operation_id,
+            cancellation: cancellation.clone(),
+        });
+        Ok(cancellation)
+    }
+
+    fn finish_capture(&self, operation_id: CaptureOperationId) {
+        let mut active = self.active_lock();
+        if active
+            .as_ref()
+            .is_some_and(|current| current.operation_id == operation_id)
+        {
+            *active = None;
+        }
+    }
+
+    async fn capture_target(
+        &self,
+        target_id: &str,
         cancellation: CancellationToken,
     ) -> Result<CapturePreview, CaptureError> {
-        self.images.clear();
         let capabilities = self.backend.capabilities().await;
         if !capabilities.is_supported() {
             return Err(CaptureError::new(
@@ -74,6 +164,18 @@ impl ScreenCaptureService {
             ));
         }
         let target = self.backend.target_by_id(target_id).await?;
+        if !capabilities.supports(target.kind) {
+            return Err(CaptureError::new(
+                CaptureErrorKind::Unsupported,
+                "This screen or window capture type is unavailable",
+            ));
+        }
+        if cancellation.is_cancelled() {
+            return Err(CaptureError::new(
+                CaptureErrorKind::Cancelled,
+                "Screen capture was cancelled",
+            ));
+        }
         let pixels = self.backend.capture(&target, cancellation.clone()).await?;
         if cancellation.is_cancelled() {
             return Err(CaptureError::new(
@@ -82,7 +184,19 @@ impl ScreenCaptureService {
             ));
         }
         let prepared = prepare_image(pixels)?;
+        if cancellation.is_cancelled() {
+            return Err(CaptureError::new(
+                CaptureErrorKind::Cancelled,
+                "Screen capture was cancelled",
+            ));
+        }
         self.images.insert(prepared)
+    }
+
+    fn active_lock(&self) -> MutexGuard<'_, Option<ActiveCapture>> {
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Replaces the stored image with a validated crop of its prepared pixels.
@@ -114,6 +228,13 @@ impl ScreenCaptureService {
     }
 }
 
+const fn no_matching_capture_error() -> CaptureError {
+    CaptureError::new(
+        CaptureErrorKind::NoMatchingCapture,
+        "No active screen capture matches that identifier",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -122,13 +243,15 @@ mod tests {
     use xcap::image::{Rgba, RgbaImage};
 
     use super::{
-        CaptureBackend, CaptureCapabilities, CaptureError, CaptureErrorKind, CapturePermission,
-        CaptureTarget, CaptureTargetKind, ScreenCaptureService, TransientImageStore,
+        CaptureBackend, CaptureCapabilities, CaptureError, CaptureErrorKind, CaptureOperationId,
+        CapturePermission, CaptureTarget, CaptureTargetKind, ScreenCaptureService,
+        TransientImageStore, prepare_image,
     };
 
     struct FakeBackend {
         capabilities: CaptureCapabilities,
         capture_calls: AtomicUsize,
+        wait_for_cancellation: bool,
     }
 
     impl FakeBackend {
@@ -136,6 +259,15 @@ mod tests {
             Self {
                 capabilities,
                 capture_calls: AtomicUsize::new(0),
+                wait_for_cancellation: false,
+            }
+        }
+
+        fn cancellable(capabilities: CaptureCapabilities) -> Self {
+            Self {
+                capabilities,
+                capture_calls: AtomicUsize::new(0),
+                wait_for_cancellation: true,
             }
         }
     }
@@ -160,9 +292,16 @@ mod tests {
         async fn capture(
             &self,
             _target: &CaptureTarget,
-            _cancellation: tokio_util::sync::CancellationToken,
+            cancellation: tokio_util::sync::CancellationToken,
         ) -> Result<RgbaImage, CaptureError> {
             self.capture_calls.fetch_add(1, Ordering::SeqCst);
+            if self.wait_for_cancellation {
+                cancellation.cancelled().await;
+                return Err(CaptureError::new(
+                    CaptureErrorKind::Cancelled,
+                    "Screen capture was cancelled",
+                ));
+            }
             Ok(RgbaImage::from_pixel(2, 2, Rgba([1, 2, 3, 255])))
         }
     }
@@ -195,7 +334,7 @@ mod tests {
         assert_eq!(backend.capture_calls.load(Ordering::SeqCst), 0);
 
         let preview = service
-            .capture("monitor-1", tokio_util::sync::CancellationToken::new())
+            .capture("monitor-1", CaptureOperationId::new())
             .await
             .expect("explicit capture succeeds");
         assert_eq!(backend.capture_calls.load(Ordering::SeqCst), 1);
@@ -215,7 +354,7 @@ mod tests {
         );
 
         let error = service
-            .capture("monitor-1", tokio_util::sync::CancellationToken::new())
+            .capture("monitor-1", CaptureOperationId::new())
             .await
             .expect_err("unsupported capture is rejected");
 
@@ -235,11 +374,85 @@ mod tests {
         );
 
         let error = service
-            .capture("monitor-1", tokio_util::sync::CancellationToken::new())
+            .capture("monitor-1", CaptureOperationId::new())
             .await
             .expect_err("denied permission is rejected");
 
         assert_eq!(error.kind, CaptureErrorKind::PermissionDenied);
         assert_eq!(backend.capture_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn cancelling_capture_releases_prior_preview_and_active_operation() {
+        let store = std::sync::Arc::new(TransientImageStore::default());
+        let previous = store
+            .insert(
+                prepare_image(RgbaImage::from_pixel(2, 2, Rgba([1, 2, 3, 255])))
+                    .expect("previous preview is prepared"),
+            )
+            .expect("previous preview is stored");
+        let backend = std::sync::Arc::new(FakeBackend::cancellable(capabilities()));
+        let service =
+            std::sync::Arc::new(ScreenCaptureService::new(backend.clone(), store.clone()));
+        let operation_id = CaptureOperationId::new();
+        let capture_service = service.clone();
+        let task =
+            tokio::spawn(async move { capture_service.capture("monitor-1", operation_id).await });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while backend.capture_calls.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("capture backend starts");
+
+        service
+            .cancel_capture(operation_id)
+            .expect("active capture cancels");
+        let error = task
+            .await
+            .expect("capture task joins")
+            .expect_err("cancelled capture has no preview");
+
+        assert_eq!(error.kind, CaptureErrorKind::Cancelled);
+        assert_eq!(
+            store
+                .preview(&previous.capture_id)
+                .expect_err("old preview was cleared before capture")
+                .kind,
+            CaptureErrorKind::ImageExpired
+        );
+        assert_eq!(
+            service
+                .cancel_capture(operation_id)
+                .expect_err("completed operation is no longer active")
+                .kind,
+            CaptureErrorKind::NoMatchingCapture
+        );
+    }
+
+    #[test]
+    fn clearing_capture_service_removes_its_preview_for_session_reset() {
+        let store = std::sync::Arc::new(TransientImageStore::default());
+        let preview = store
+            .insert(
+                prepare_image(RgbaImage::from_pixel(2, 2, Rgba([1, 2, 3, 255])))
+                    .expect("preview is prepared"),
+            )
+            .expect("preview is stored");
+        let service = ScreenCaptureService::new(
+            std::sync::Arc::new(FakeBackend::new(capabilities())),
+            store.clone(),
+        );
+
+        service.clear();
+
+        assert_eq!(
+            store
+                .preview(&preview.capture_id)
+                .expect_err("session reset clears the preview")
+                .kind,
+            CaptureErrorKind::ImageExpired
+        );
     }
 }

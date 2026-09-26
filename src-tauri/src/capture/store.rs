@@ -41,6 +41,8 @@ impl fmt::Display for CaptureId {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CapturePreview {
     pub capture_id: CaptureId,
     pub data_url: String,

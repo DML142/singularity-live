@@ -1,5 +1,6 @@
 use std::{fmt, io::Cursor};
 
+use serde::{Deserialize, Serialize};
 use xcap::image::{DynamicImage, ImageFormat, RgbaImage, imageops::FilterType};
 
 use super::CaptureError;
@@ -66,7 +67,8 @@ impl fmt::Debug for PreparedImage {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CropRect {
     pub x: u32,
     pub y: u32,

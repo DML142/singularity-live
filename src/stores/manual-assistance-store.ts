@@ -9,6 +9,7 @@ import {
   type ManualAssistanceEvent,
   type ManualAssistanceReadiness,
 } from "../lib/tauri/manual-assistance-client";
+import { startScreenshotAssistance } from "../lib/tauri/screen-assistance-client";
 
 type ReadinessState =
   | { readonly phase: "loading" }
@@ -45,9 +46,10 @@ interface ManualAssistanceState {
   readonly activeTurnId: number | null;
   readonly loadReadiness: () => Promise<void>;
   readonly initialize: () => Promise<() => void>;
-  readonly start: (text: string) => Promise<void>;
+  readonly start: (text: string, screenshotCaptureId?: string) => Promise<boolean>;
+  readonly startScreenshot: (captureId: string) => Promise<boolean>;
   readonly cancel: () => Promise<void>;
-  readonly resetSession: () => Promise<void>;
+  readonly resetSession: () => Promise<boolean>;
   readonly handleEvent: (event: ManualAssistanceEvent) => void;
 }
 
@@ -85,6 +87,8 @@ function safeCommandError(error: unknown): string {
         return "Enter text before sending a request";
       case "inputTooLarge":
         return "Keep your request under 16 KiB";
+      case "noPreviousRequest":
+        return "Ask a text question before sending a screenshot";
       case "busy":
         return "A request is already in progress";
       case "notConfigured":
@@ -220,13 +224,13 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
       return () => {};
     }
   },
-  start: async (text) => {
+  start: async (text, screenshotCaptureId) => {
     if (
       get().phase === "starting" ||
       get().phase === "streaming" ||
       get().resetPending
     ) {
-      return;
+      return false;
     }
     bufferedEvents = [];
     const turnId = nextTurnId;
@@ -251,7 +255,10 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
       ],
     });
     try {
-      const requestId = await startManualAssistance(text);
+      const requestId =
+        screenshotCaptureId === undefined
+          ? await startManualAssistance(text)
+          : await startScreenshotAssistance(screenshotCaptureId);
       const state = get();
       if (state.phase === "starting") {
         set({
@@ -283,6 +290,7 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
           })),
         });
       }
+      return true;
     } catch (error) {
       bufferedEvents = [];
       const message = safeCommandError(error);
@@ -297,8 +305,14 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
           error: message,
         })),
       });
+      return false;
     }
   },
+  startScreenshot: async (captureId) =>
+    get().start(
+      "Continue answering the previous request using the attached screenshot.",
+      captureId,
+    ),
   cancel: async () => {
     const state = get();
     if (
@@ -334,7 +348,7 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
       state.phase === "streaming" ||
       state.resetPending
     ) {
-      return;
+      return false;
     }
 
     set({ resetPending: true, resetError: null });
@@ -345,7 +359,7 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
         resetPending: false,
         resetError: "The session could not be reset. Try again.",
       });
-      return;
+      return false;
     }
 
     bufferedEvents = [];
@@ -361,6 +375,7 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
       turns: [],
       activeTurnId: null,
     });
+    return true;
   },
   handleEvent: (event) => {
     if (retiredRequestIds.has(event.requestId)) {

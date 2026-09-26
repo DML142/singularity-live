@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-discard-screen-capture"
+description = "Enables the discard_screen_capture command without any pre-configured scope."
+commands.allow = ["discard_screen_capture"]
+
+[[permission]]
+identifier = "deny-discard-screen-capture"
+description = "Denies the discard_screen_capture command without any pre-configured scope."
+commands.deny = ["discard_screen_capture"]

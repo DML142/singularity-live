@@ -3,6 +3,7 @@ use std::{error::Error as StdError, fmt, sync::Arc};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 use xcap::{Monitor, Window, XCapError, image::RgbaImage};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -10,6 +11,37 @@ use xcap::{Monitor, Window, XCapError, image::RgbaImage};
 pub enum CaptureTargetKind {
     Monitor,
     Window,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct CaptureOperationId(Uuid);
+
+impl CaptureOperationId {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    /// Parses an operation identifier received from the desktop webview.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-target error when the value is not a UUID.
+    pub fn parse(value: &str) -> Result<Self, CaptureError> {
+        Uuid::parse_str(value).map(Self).map_err(|_| {
+            CaptureError::new(
+                CaptureErrorKind::InvalidTarget,
+                "The capture operation identifier is invalid",
+            )
+        })
+    }
+}
+
+impl Default for CaptureOperationId {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
@@ -72,6 +104,7 @@ pub enum CaptureErrorKind {
     Preparation,
     Cancelled,
     Busy,
+    NoMatchingCapture,
     Unavailable,
 }
 

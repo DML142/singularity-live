@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-crop-screen-capture"
+description = "Enables the crop_screen_capture command without any pre-configured scope."
+commands.allow = ["crop_screen_capture"]
+
+[[permission]]
+identifier = "deny-crop-screen-capture"
+description = "Denies the crop_screen_capture command without any pre-configured scope."
+commands.deny = ["crop_screen_capture"]

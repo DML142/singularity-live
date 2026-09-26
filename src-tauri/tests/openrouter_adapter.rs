@@ -185,7 +185,9 @@ async fn translates_requests_and_streams_text_with_usage() {
     assert_eq!(json["messages"][1]["role"], "user");
     assert_eq!(
         json["messages"][1]["content"],
-        generation_request.messages[0].content
+        generation_request.messages[0]
+            .text_content()
+            .expect("text message")
     );
     assert_eq!(
         sink.events(),
@@ -257,6 +259,56 @@ async fn serializes_conversation_history_in_role_order() {
     );
     assert_eq!(json["messages"][3]["role"], "user");
     assert_eq!(json["messages"][3]["content"], "Explain this function.");
+}
+
+#[tokio::test]
+async fn serializes_a_screenshot_as_an_ordered_multimodal_user_message() {
+    let (endpoint, captured_request) = start_server(MockResponse {
+        status: 200,
+        body_chunks: vec![
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Read\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n",
+            "data: [DONE]\n\n",
+        ],
+        delay_before_response: Duration::ZERO,
+    })
+    .await;
+    let adapter = OpenRouterAdapter::with_test_endpoint(
+        reqwest::Client::new(),
+        endpoint,
+        Duration::from_secs(2),
+    );
+    let sink = RecordingSink::default();
+    let mut generation_request = request();
+    generation_request.messages = vec![ConversationMessage::user_with_png(
+        "Continue answering what this code does.",
+        vec![0, 1, 2],
+    )];
+
+    adapter
+        .stream(
+            &generation_request,
+            &secret(),
+            CancellationToken::new(),
+            &sink,
+        )
+        .await
+        .expect("mock provider completes");
+
+    let raw_request = captured_request.await.expect("captured request");
+    let body = raw_request.split("\r\n\r\n").nth(1).expect("request body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("request JSON");
+    assert_eq!(json["messages"][1]["role"], "user");
+    assert_eq!(
+        json["messages"][1]["content"],
+        serde_json::json!([
+            {"type": "text", "text": "Continue answering what this code does."},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,AAEC"}
+            }
+        ])
+    );
 }
 
 #[tokio::test]

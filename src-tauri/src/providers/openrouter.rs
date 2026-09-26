@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures_util::StreamExt;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -9,8 +10,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     domain::{
-        CompletedResponse, ConversationRole, ProviderError, ProviderErrorKind, ProviderId,
-        StreamEvent, TextGenerationRequest, Usage,
+        CompletedResponse, ConversationRole, MessagePart, ProviderError, ProviderErrorKind,
+        ProviderId, StreamEvent, TextGenerationRequest, Usage,
     },
     secrets::SecretValue,
 };
@@ -98,10 +99,10 @@ impl TextGenerationProvider for OpenRouterAdapter {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 struct OpenRouterRequest<'a> {
     model: &'a str,
-    messages: Vec<OpenRouterMessage<'a>>,
+    messages: Vec<OpenRouterMessage>,
     stream: bool,
     stream_options: StreamOptions,
 }
@@ -111,14 +112,41 @@ impl<'a> From<&'a TextGenerationRequest> for OpenRouterRequest<'a> {
         let mut messages = Vec::with_capacity(request.messages.len() + 1);
         messages.push(OpenRouterMessage {
             role: "system",
-            content: &request.system_prompt,
+            content: serde_json::Value::String(request.system_prompt.clone()),
         });
-        messages.extend(request.messages.iter().map(|message| OpenRouterMessage {
-            role: match message.role {
-                ConversationRole::User => "user",
-                ConversationRole::Assistant => "assistant",
-            },
-            content: &message.content,
+        messages.extend(request.messages.iter().map(|message| {
+            let mut image_parts = Vec::new();
+            let mut text_content = None;
+            for part in &message.parts {
+                match part {
+                    MessagePart::Text(text) => {
+                        text_content = Some(text.as_str());
+                        image_parts.push(serde_json::json!({"type": "text", "text": text}));
+                    }
+                    MessagePart::Image(image) => {
+                        let data_url = format!(
+                            "data:image/png;base64,{}",
+                            STANDARD.encode(image.png_bytes())
+                        );
+                        image_parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {"url": data_url}
+                        }));
+                    }
+                }
+            }
+            let content = if image_parts.iter().any(|part| part["type"] == "image_url") {
+                serde_json::Value::Array(image_parts)
+            } else {
+                serde_json::Value::String(text_content.unwrap_or_default().to_owned())
+            };
+            OpenRouterMessage {
+                role: match message.role {
+                    ConversationRole::User => "user",
+                    ConversationRole::Assistant => "assistant",
+                },
+                content,
+            }
         }));
 
         Self {
@@ -132,10 +160,10 @@ impl<'a> From<&'a TextGenerationRequest> for OpenRouterRequest<'a> {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct OpenRouterMessage<'a> {
+#[derive(Serialize)]
+struct OpenRouterMessage {
     role: &'static str,
-    content: &'a str,
+    content: serde_json::Value,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]

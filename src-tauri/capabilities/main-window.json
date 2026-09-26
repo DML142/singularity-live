@@ -9,6 +9,13 @@
     "allow-start-manual-assistance",
     "allow-cancel-manual-assistance",
     "allow-reset-session",
+    "allow-get-screen-capture-capabilities",
+    "allow-list-screen-capture-targets",
+    "allow-start-screen-capture",
+    "allow-cancel-screen-capture",
+    "allow-crop-screen-capture",
+    "allow-discard-screen-capture",
+    "allow-start-screenshot-assistance",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

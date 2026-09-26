@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use app::SessionService;
+use capture::{ScreenCaptureService, TransientImageStore, platform_capture_backend};
 use config::{AppConfig, EnvironmentConfigSource};
 use providers::ProviderRouter;
 use secrets::EnvironmentSecretStore;
@@ -32,6 +33,10 @@ pub fn run() {
                 )),
             };
             application.manage(service);
+            application.manage(Arc::new(ScreenCaptureService::new(
+                platform_capture_backend(),
+                Arc::new(TransientImageStore::default()),
+            )));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -40,6 +45,13 @@ pub fn run() {
             commands::manual_assistance::start_manual_assistance,
             commands::manual_assistance::cancel_manual_assistance,
             commands::manual_assistance::reset_session,
+            commands::screen_assistance::get_screen_capture_capabilities,
+            commands::screen_assistance::list_screen_capture_targets,
+            commands::screen_assistance::start_screen_capture,
+            commands::screen_assistance::cancel_screen_capture,
+            commands::screen_assistance::crop_screen_capture,
+            commands::screen_assistance::discard_screen_capture,
+            commands::screen_assistance::start_screenshot_assistance,
         ])
         .run(tauri::generate_context!())
         .expect("the Tauri runtime must initialize for the application to start");

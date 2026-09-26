@@ -11,15 +11,17 @@ use std::{
 use async_trait::async_trait;
 use singularity_live::{
     app::{ManualAssistanceError, ManualAssistanceReadiness, SessionService},
+    capture::prepare_image,
     domain::{
-        CompletedResponse, ConversationMessage, ModelId, ProviderError, ProviderErrorKind,
-        ProviderId, RequestId, StreamEvent, TextGenerationRequest,
+        CompletedResponse, ConversationMessage, MessagePart, ModelId, ProviderError,
+        ProviderErrorKind, ProviderId, RequestId, StreamEvent, TextGenerationRequest,
     },
     providers::{StreamSink, TextGenerationRouter},
 };
 use tempfile::TempDir;
 use tokio::{sync::mpsc, time::timeout};
 use tokio_util::sync::CancellationToken;
+use xcap::image::{Rgba, RgbaImage};
 
 const MANIFEST: &str = r"schema_version: 1
 id: fictional
@@ -487,6 +489,207 @@ async fn loads_selected_context_and_forwards_a_successful_stream() {
 }
 
 #[tokio::test]
+async fn screenshot_uses_prior_text_intent_and_retains_only_text_after_completion() {
+    let pack = PackFixture::new();
+    let router = Arc::new(FakeRouter::with_script(vec![
+        RouterBehavior::Text("Send the code and I can explain it.".to_owned()),
+        RouterBehavior::Success,
+    ]));
+    let captured = Arc::clone(&router.captured);
+    let service = service(&pack, router);
+    complete_request(&service, "What does this Rust code do?").await;
+    let pixels = RgbaImage::from_pixel(2, 2, Rgba([17, 23, 31, 255]));
+    let image = prepare_image(pixels).expect("screenshot image is prepared");
+    let (sink, mut receiver) = channel_sink();
+
+    let request_id = service
+        .start_screenshot(image, sink)
+        .expect("screenshot request starts");
+    assert_eq!(
+        next_event(&mut receiver).await,
+        StreamEvent::Started { request_id }
+    );
+    loop {
+        match next_event(&mut receiver).await {
+            StreamEvent::Completed(_) => break,
+            StreamEvent::Failed { error, .. } => panic!("screenshot request failed: {error}"),
+            StreamEvent::Cancelled { .. } => panic!("screenshot request was cancelled"),
+            StreamEvent::Started { .. } | StreamEvent::TextDelta { .. } => {}
+        }
+    }
+
+    {
+        let requests = captured.lock().expect("captured requests");
+        let screenshot = &requests[1];
+        assert!(
+            screenshot
+                .selected_context
+                .documents
+                .iter()
+                .any(|document| document.id == "rust")
+        );
+        assert_eq!(
+            screenshot.messages[0].text_content(),
+            Some("What does this Rust code do?")
+        );
+        assert_eq!(
+            screenshot.messages[2].text_content(),
+            Some("Continue answering the previous request using the attached screenshot.")
+        );
+        assert!(matches!(
+            screenshot.messages[2].parts.as_slice(),
+            [MessagePart::Text(_), MessagePart::Image(_)]
+        ));
+        assert!(format!("{screenshot:?}").contains("[REDACTED]"));
+    }
+
+    complete_request(&service, "Next question").await;
+    let requests = captured.lock().expect("captured requests");
+    assert!(requests[2].messages.iter().all(|message| {
+        message
+            .parts
+            .iter()
+            .all(|part| matches!(part, MessagePart::Text(_)))
+    }));
+    assert!(
+        requests[2]
+            .messages
+            .iter()
+            .any(|message| message.text_content()
+                == Some("Continue answering the previous request using the attached screenshot."))
+    );
+}
+
+#[tokio::test]
+async fn screenshot_requires_an_existing_text_intent() {
+    let pack = PackFixture::new();
+    let router = Arc::new(FakeRouter::new(RouterBehavior::Success));
+    let captured = Arc::clone(&router.captured);
+    let service = service(&pack, router);
+    let image = prepare_image(RgbaImage::from_pixel(2, 2, Rgba([17, 23, 31, 255])))
+        .expect("screenshot image is prepared");
+    let (sink, _) = channel_sink();
+
+    assert_eq!(
+        service.start_screenshot(image, sink),
+        Err(ManualAssistanceError::NoPreviousRequest)
+    );
+    assert!(captured.lock().expect("captured requests").is_empty());
+    assert!(!service.has_active_request());
+}
+
+#[tokio::test]
+async fn screenshot_provider_failure_does_not_retain_the_image_or_failed_turn() {
+    let pack = PackFixture::new();
+    let router = Arc::new(FakeRouter::with_script(vec![
+        RouterBehavior::Success,
+        RouterBehavior::Failure(ProviderErrorKind::RateLimit),
+        RouterBehavior::Success,
+    ]));
+    let captured = Arc::clone(&router.captured);
+    let service = service(&pack, router);
+    complete_request(&service, "What does this Rust code do?").await;
+    let image = prepare_image(RgbaImage::from_pixel(2, 2, Rgba([17, 23, 31, 255])))
+        .expect("screenshot image is prepared");
+    let (sink, mut receiver) = channel_sink();
+    let request_id = service
+        .start_screenshot(image, sink)
+        .expect("screenshot request starts");
+    assert_eq!(
+        next_event(&mut receiver).await,
+        StreamEvent::Started { request_id }
+    );
+    assert!(matches!(
+        next_event(&mut receiver).await,
+        StreamEvent::Failed { request_id: failed_id, .. } if failed_id == request_id
+    ));
+
+    complete_request(&service, "Try again without a screenshot").await;
+    let requests = captured.lock().expect("captured requests");
+    assert!(
+        requests[1].messages[2]
+            .parts
+            .iter()
+            .any(|part| matches!(part, MessagePart::Image(_)))
+    );
+    assert!(requests[2].messages.iter().all(|message| {
+        message
+            .parts
+            .iter()
+            .all(|part| matches!(part, MessagePart::Text(_)))
+    }));
+    assert!(
+        requests[2]
+            .messages
+            .iter()
+            .all(|message| message.text_content()
+                != Some("Continue answering the previous request using the attached screenshot."))
+    );
+}
+
+#[tokio::test]
+async fn cancelling_a_screenshot_request_does_not_retain_the_image_or_failed_turn() {
+    let pack = PackFixture::new();
+    let router = Arc::new(FakeRouter::with_script(vec![
+        RouterBehavior::Success,
+        RouterBehavior::WaitForCancellation,
+        RouterBehavior::Success,
+    ]));
+    let captured = Arc::clone(&router.captured);
+    let service = service(&pack, router);
+    complete_request(&service, "What does this Rust code do?").await;
+    let image = prepare_image(RgbaImage::from_pixel(2, 2, Rgba([17, 23, 31, 255])))
+        .expect("screenshot image is prepared");
+    let (sink, mut receiver) = channel_sink();
+    let request_id = service
+        .start_screenshot(image, sink)
+        .expect("screenshot request starts");
+    assert_eq!(
+        next_event(&mut receiver).await,
+        StreamEvent::Started { request_id }
+    );
+    timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if captured.lock().expect("captured requests").len() == 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("screenshot provider starts");
+    service
+        .cancel(request_id)
+        .expect("screenshot request cancels");
+    assert_eq!(
+        next_event(&mut receiver).await,
+        StreamEvent::Cancelled { request_id }
+    );
+
+    complete_request(&service, "Try again without a screenshot").await;
+    let requests = captured.lock().expect("captured requests");
+    assert!(
+        requests[1].messages[2]
+            .parts
+            .iter()
+            .any(|part| matches!(part, MessagePart::Image(_)))
+    );
+    assert!(requests[2].messages.iter().all(|message| {
+        message
+            .parts
+            .iter()
+            .all(|part| matches!(part, MessagePart::Text(_)))
+    }));
+    assert!(
+        requests[2]
+            .messages
+            .iter()
+            .all(|message| message.text_content()
+                != Some("Continue answering the previous request using the attached screenshot."))
+    );
+}
+
+#[tokio::test]
 async fn releases_the_active_slot_before_publishing_a_terminal_event() {
     let pack = PackFixture::new();
     let service = service(&pack, Arc::new(FakeRouter::new(RouterBehavior::Success)));
@@ -654,7 +857,12 @@ async fn summary_keeps_the_older_goal_and_the_answer_keeps_the_newest_eight_turn
     let requests = requests.lock().expect("captured requests");
     assert_eq!(requests.len(), 11);
     assert!(requests[9].system_prompt.contains("pending requests"));
-    assert!(requests[9].messages[0].content.contains("Question 0"));
+    assert!(
+        requests[9].messages[0]
+            .text_content()
+            .expect("summary message is text")
+            .contains("Question 0")
+    );
     assert!(
         requests[10]
             .system_prompt
@@ -673,7 +881,7 @@ async fn summary_keeps_the_older_goal_and_the_answer_keeps_the_newest_eight_turn
         + requests[10]
             .messages
             .iter()
-            .map(|message| message.content.len())
+            .map(|message| message.text_content().unwrap_or_default().len())
             .sum::<usize>();
     assert!(combined_bytes <= 64 * 1024);
 }
@@ -709,7 +917,8 @@ async fn empty_summary_fails_safely_without_discarding_prior_history() {
     let requests = requests.lock().expect("captured requests");
     assert!(
         requests[2].messages[0]
-            .content
+            .text_content()
+            .expect("summary message is text")
             .contains("Explain this code")
     );
     assert!(
@@ -761,12 +970,14 @@ async fn cancellation_during_summary_preserves_the_old_request_context() {
     let requests = requests.lock().expect("captured requests");
     assert!(
         requests[2].messages[0]
-            .content
+            .text_content()
+            .expect("summary message is text")
             .contains("Explain this code")
     );
     assert!(
         !requests[2].messages[0]
-            .content
+            .text_content()
+            .expect("summary message is text")
             .contains("Waiting follow-up")
     );
 }

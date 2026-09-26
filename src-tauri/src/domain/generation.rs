@@ -104,9 +104,41 @@ pub enum ConversationRole {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MessagePart {
+    Text(String),
+    Image(ImageAttachment),
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ImageAttachment {
+    png_bytes: Vec<u8>,
+}
+
+impl ImageAttachment {
+    #[must_use]
+    pub fn png(png_bytes: Vec<u8>) -> Self {
+        Self { png_bytes }
+    }
+
+    #[must_use]
+    pub fn png_bytes(&self) -> &[u8] {
+        &self.png_bytes
+    }
+}
+
+impl fmt::Debug for ImageAttachment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImageAttachment")
+            .field("png_bytes", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationMessage {
     pub role: ConversationRole,
-    pub content: String,
+    pub parts: Vec<MessagePart>,
 }
 
 impl ConversationMessage {
@@ -114,7 +146,18 @@ impl ConversationMessage {
     pub fn user(content: impl Into<String>) -> Self {
         Self {
             role: ConversationRole::User,
-            content: content.into(),
+            parts: vec![MessagePart::Text(content.into())],
+        }
+    }
+
+    #[must_use]
+    pub fn user_with_png(content: impl Into<String>, png_bytes: Vec<u8>) -> Self {
+        Self {
+            role: ConversationRole::User,
+            parts: vec![
+                MessagePart::Text(content.into()),
+                MessagePart::Image(ImageAttachment::png(png_bytes)),
+            ],
         }
     }
 
@@ -122,8 +165,16 @@ impl ConversationMessage {
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: ConversationRole::Assistant,
-            content: content.into(),
+            parts: vec![MessagePart::Text(content.into())],
         }
+    }
+
+    #[must_use]
+    pub fn text_content(&self) -> Option<&str> {
+        self.parts.iter().find_map(|part| match part {
+            MessagePart::Text(content) => Some(content.as_str()),
+            MessagePart::Image(_) => None,
+        })
     }
 }
 

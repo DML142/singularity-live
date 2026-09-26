@@ -453,3 +453,45 @@ const fn unavailable_error() -> CaptureError {
         "The screen sharing service is unavailable",
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use pipewire::spa::{
+        param::video::{VideoFormat, VideoInfoRaw},
+        utils::Rectangle,
+    };
+
+    use super::rgba_from_buffer;
+
+    #[test]
+    fn converts_one_padded_bgrx_pipewire_frame_to_rgba() {
+        let mut video = VideoInfoRaw::new();
+        video.set_format(VideoFormat::BGRx);
+        video.set_size(Rectangle {
+            width: 1,
+            height: 2,
+        });
+        let bytes = [
+            99, 99, 3, 2, 1, 0, 88, 88, 88, 88, 6, 5, 4, 0, 77, 77, 77, 77,
+        ];
+
+        let frame = rgba_from_buffer(&bytes, 2, 16, 8, video)
+            .expect("a supported PipeWire frame is converted");
+
+        assert_eq!(frame.dimensions(), (1, 2));
+        assert_eq!(frame.as_raw(), &[1, 2, 3, 255, 4, 5, 6, 255]);
+    }
+
+    #[test]
+    fn rejects_pipewire_frames_with_short_or_negative_stride() {
+        let mut video = VideoInfoRaw::new();
+        video.set_format(VideoFormat::RGBA);
+        video.set_size(Rectangle {
+            width: 1,
+            height: 1,
+        });
+
+        assert!(rgba_from_buffer(&[1, 2, 3, 4], 0, 4, 3, video).is_err());
+        assert!(rgba_from_buffer(&[1, 2, 3, 4], 0, 4, -4, video).is_err());
+    }
+}

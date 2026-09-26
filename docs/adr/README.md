@@ -13,3 +13,4 @@ boundary, security posture, persistence strategy, or platform approach.
 - [0002 — Provider-neutral application boundary](0002-provider-neutral-application-boundary.md)
 - [0003 — OpenRouter and the manual-assistance trust boundary](0003-openrouter-manual-assistance-boundary.md)
 - [0004 — Ephemeral session context and Rust-owned lifecycle](0004-ephemeral-session-context.md)
+- [0005 — Ephemeral screen assistance and provider-neutral image requests](0005-ephemeral-screen-assistance.md)

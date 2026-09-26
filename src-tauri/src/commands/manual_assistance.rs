@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     app::{ManualAssistanceError, ManualAssistanceReadiness, SessionService},
+    capture::ScreenCaptureService,
     domain::{ProviderError, ProviderErrorKind, ProviderId, RequestId, StreamEvent, Usage},
     providers::StreamSink,
 };
@@ -132,6 +133,7 @@ impl From<ManualAssistanceError> for CommandError {
         let code = match value {
             ManualAssistanceError::EmptyInput => "emptyInput",
             ManualAssistanceError::InputTooLarge => "inputTooLarge",
+            ManualAssistanceError::NoPreviousRequest => "noPreviousRequest",
             ManualAssistanceError::Busy => "busy",
             ManualAssistanceError::NotConfigured { .. } => "notConfigured",
             ManualAssistanceError::ContextUnavailable { .. } => "contextUnavailable",
@@ -145,8 +147,14 @@ impl From<ManualAssistanceError> for CommandError {
     }
 }
 
-struct TauriEventSink {
+pub(super) struct TauriEventSink {
     app: AppHandle,
+}
+
+impl TauriEventSink {
+    pub(super) fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
 }
 
 impl StreamSink for TauriEventSink {
@@ -179,7 +187,7 @@ pub async fn start_manual_assistance(
     service: State<'_, Arc<SessionService>>,
     app: AppHandle,
 ) -> Result<StartManualAssistanceResponse, CommandError> {
-    let sink = Arc::new(TauriEventSink { app });
+    let sink = Arc::new(TauriEventSink::new(app));
     let result = service.start(&request.text, sink);
     tokio::task::yield_now().await;
     result
@@ -203,8 +211,13 @@ pub async fn cancel_manual_assistance(
 }
 
 #[tauri::command]
-pub async fn reset_session(service: State<'_, Arc<SessionService>>) -> Result<(), CommandError> {
-    service.reset().map_err(CommandError::from)
+pub async fn reset_session(
+    service: State<'_, Arc<SessionService>>,
+    captures: State<'_, Arc<ScreenCaptureService>>,
+) -> Result<(), CommandError> {
+    service.reset().map_err(CommandError::from)?;
+    captures.clear();
+    Ok(())
 }
 
 const fn provider_error_code(kind: ProviderErrorKind) -> &'static str {
