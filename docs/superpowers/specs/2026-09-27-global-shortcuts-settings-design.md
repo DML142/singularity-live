@@ -1,6 +1,6 @@
 # Global Shortcuts and Binds Settings
 
-**Status:** Draft for user review
+**Status:** Approved with platform capability correction — 2026-09-27
 
 **Date:** 2026-09-27
 **Planning label:** Proposed Phase 2.5 follow-up to transient screen assistance
@@ -56,12 +56,15 @@ launcher that avoids repeated shell setup without saving credentials.
 ## Architecture and data flow
 
 The existing Tauri process owns shortcut registration and dispatch. Rust loads and
-validates the binding configuration, registers shortcuts through the Tauri desktop
-global-shortcut plugin, and routes a `Screenshot` activation to the existing Rust capture
-service. The settings view and Binds tab live in the main window. React presents settings,
-collects a chord only while a bind row is explicitly in recording mode, and displays
-registration, capture, permission, and error states. React does not register OS shortcuts
-or orchestrate capture.
+validates the binding configuration and routes a `Screenshot` activation to the existing
+Rust capture service. Windows, macOS, and Linux X11 use the Tauri desktop global-shortcut
+plugin. Linux Wayland uses the XDG GlobalShortcuts portal, which may show system UI for
+consent or shortcut selection; the app reports the portal's effective trigger and any
+registration failure. It does not claim that a Wayland binding is active until the portal
+confirms it. The settings view and Binds tab live in the main window. React presents
+settings, collects a chord only while a bind row is explicitly in recording mode, and
+displays registration, capture, permission, and error states. React does not register OS
+shortcuts or orchestrate capture.
 
 On shortcut activation, Rust resolves the monitor under the pointer using a platform
 adapter, hides the main window, invokes the existing explicit one-frame capture path, and
@@ -104,7 +107,8 @@ cannot be registered is reported in settings while other valid bindings remain u
 
 - A hotkey press while another capture or manual request is active does not start a second
   capture or request. The app reports its busy state in the restored window.
-- Shortcut registration conflicts, unsupported key codes, inaccessible screen sources,
+- Shortcut registration conflicts, unsupported key codes, unavailable or rejected
+  Wayland shortcut portal requests, inaccessible screen sources,
   denied permissions, capture failures, and window restore failures are mapped to safe UI
   states. Screenshot bytes, API keys, and full provider payloads are not logged.
 - If capture is cancelled or fails after hiding the window, the application restores the
