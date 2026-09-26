@@ -15,6 +15,7 @@ pub mod context;
 pub mod domain;
 pub mod providers;
 pub mod secrets;
+pub mod shortcuts;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Starts the Singularity Live desktop runtime.
