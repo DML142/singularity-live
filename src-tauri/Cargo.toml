@@ -15,6 +15,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 async-trait = "0.1.92"
+base64 = "0.22.1"
 bytes = "1.12.1"
 futures-util = "0.3.32"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "stream"] }
@@ -26,6 +27,11 @@ thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-util = "0.7.19"
 uuid = { version = "1.26.1", features = ["serde", "v4"] }
+xcap = "0.9.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13.13", features = ["screencast"] }
+pipewire = "0.10.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"

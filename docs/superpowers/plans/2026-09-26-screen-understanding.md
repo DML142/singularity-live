@@ -53,14 +53,14 @@
   which selects exactly one monitor/window, disables portal persistence, reads one PipeWire
   video frame, then closes the stream and portal session. Tests use fake backends.
 
-- [ ] Write tests for only-on-request capture, unsupported capability, permission failure,
+- [x] Write tests for only-on-request capture, unsupported capability, permission failure,
       invalid crop, in-memory preview, replacement, expiry, discard, and reset deletion.
-- [ ] Run `cargo test --manifest-path src-tauri/Cargo.toml capture` and confirm each new
+- [x] Run `cargo test --manifest-path src-tauri/Cargo.toml capture` and confirm each new
       behavior fails because its implementation is absent.
-- [ ] Add XCap, portal, PipeWire, and image-preparation code that makes those tests pass; keep pixel bytes out
+- [x] Add XCap, portal, PipeWire, and image-preparation code that makes those tests pass; keep pixel bytes out
       of `Debug` output and logs.
-- [ ] Run the targeted Rust tests, formatting, and Clippy.
-- [ ] Commit as `feat: add transient screenshot capture`.
+- [x] Run the targeted Rust tests, formatting, and Clippy.
+- [x] Commit as `feat: add transient screenshot capture`.
 
 ### Task 2: Multimodal session request and OpenRouter mapping
 

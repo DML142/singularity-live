@@ -7,6 +7,7 @@ use secrets::EnvironmentSecretStore;
 use tauri::Manager;
 
 pub mod app;
+pub mod capture;
 mod commands;
 pub mod config;
 pub mod context;
