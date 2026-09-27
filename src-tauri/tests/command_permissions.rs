@@ -30,3 +30,27 @@ fn main_window_can_manage_session_events_and_reset_session() {
     let reset_permission = fs::read_to_string(permission_path).expect("reset permission exists");
     assert!(reset_permission.contains("identifier = \"allow-reset-session\""));
 }
+
+#[test]
+fn main_window_can_use_only_the_explicit_screen_assistance_commands() {
+    let capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/main-window.json"))
+            .expect("main-window capability is valid JSON");
+    let permissions = capability["permissions"]
+        .as_array()
+        .expect("permission list");
+    for permission in [
+        "allow-get-screen-capture-capabilities",
+        "allow-list-screen-capture-targets",
+        "allow-start-screen-capture",
+        "allow-cancel-screen-capture",
+        "allow-crop-screen-capture",
+        "allow-discard-screen-capture",
+        "allow-start-screenshot-assistance",
+    ] {
+        assert!(
+            permissions.iter().any(|value| value == permission),
+            "missing permission {permission}"
+        );
+    }
+}

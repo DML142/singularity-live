@@ -8,9 +8,11 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
+    capture::PreparedImage,
     context::{
-        ContextPackLoader, MAX_RETAINED_ASSISTANT_BYTES, MAX_SESSION_SUMMARY_BYTES, SessionHistory,
-        build_session_system_prompt, select_context, truncate_to_bytes,
+        ContextPackLoader, MAX_RETAINED_ASSISTANT_BYTES, MAX_SESSION_SUMMARY_BYTES,
+        SCREENSHOT_FOLLOW_UP_PROMPT, SessionHistory, build_session_system_prompt, select_context,
+        truncate_to_bytes,
     },
     domain::{
         CompletedResponse, ConversationMessage, ModelId, ProviderError, ProviderErrorKind,
@@ -58,6 +60,11 @@ struct ActiveRequest {
     request_id: RequestId,
     session_id: Uuid,
     cancellation: CancellationToken,
+}
+
+struct SubmittedContent {
+    text: String,
+    image: Option<PreparedImage>,
 }
 
 impl SessionService {
@@ -138,6 +145,35 @@ impl SessionService {
         sink: Arc<dyn StreamSink>,
     ) -> Result<RequestId, ManualAssistanceError> {
         let text = validate_input(text)?;
+        self.start_request(text, None, false, sink)
+    }
+
+    /// Starts a screenshot follow-up using the most recent text intent in the session.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error for missing prior intent, unavailable provider configuration, a
+    /// busy session, or an unavailable event consumer.
+    pub fn start_screenshot(
+        self: &Arc<Self>,
+        image: PreparedImage,
+        sink: Arc<dyn StreamSink>,
+    ) -> Result<RequestId, ManualAssistanceError> {
+        self.start_request(
+            SCREENSHOT_FOLLOW_UP_PROMPT.to_owned(),
+            Some(image),
+            true,
+            sink,
+        )
+    }
+
+    fn start_request(
+        self: &Arc<Self>,
+        text: String,
+        image: Option<PreparedImage>,
+        requires_prior_intent: bool,
+        sink: Arc<dyn StreamSink>,
+    ) -> Result<RequestId, ManualAssistanceError> {
         let runtime = match &self.runtime {
             SessionRuntime::Configured(runtime) => runtime,
             SessionRuntime::Unconfigured { message } => {
@@ -155,7 +191,7 @@ impl SessionService {
 
         let request_id = RequestId::new();
         let cancellation = CancellationToken::new();
-        let history = self.reserve(request_id, cancellation.clone())?;
+        let history = self.reserve(request_id, cancellation.clone(), requires_prior_intent)?;
         if sink.emit(StreamEvent::Started { request_id }).is_err() {
             self.finish_request(request_id, None);
             return Err(ManualAssistanceError::EventConsumerUnavailable);
@@ -167,7 +203,7 @@ impl SessionService {
             let result = service
                 .process_request(
                     request_id,
-                    text,
+                    SubmittedContent { text, image },
                     runtime,
                     history,
                     cancellation,
@@ -191,7 +227,7 @@ impl SessionService {
     async fn process_request(
         &self,
         request_id: RequestId,
-        text: String,
+        content: SubmittedContent,
         runtime: ConfiguredRuntime,
         history: SessionHistory,
         cancellation: CancellationToken,
@@ -202,7 +238,15 @@ impl SessionService {
         }
         let context_pack_root = runtime.context_pack_root.clone();
         let context_pack_directory = runtime.context_pack_directory.clone();
-        let selection_text = text.clone();
+        let selection_text = content.image.as_ref().map_or_else(
+            || content.text.clone(),
+            |_| {
+                history
+                    .latest_user_intent()
+                    .unwrap_or(&content.text)
+                    .to_owned()
+            },
+        );
         let context_result = tokio::task::spawn_blocking(move || {
             let pack =
                 ContextPackLoader::load_beneath(&context_pack_root, &context_pack_directory)?;
@@ -227,6 +271,12 @@ impl SessionService {
             return Err(cancellation_error());
         }
         self.replace_history(request_id, staged_history.clone())?;
+        let mut messages = staged_history.messages_with_current(&content.text);
+        if let Some(image) = content.image
+            && let Some(current) = messages.last_mut()
+        {
+            *current = ConversationMessage::user_with_png(content.text.clone(), image.into_bytes());
+        }
         let request = TextGenerationRequest {
             request_id,
             provider: runtime.router.provider(),
@@ -236,7 +286,7 @@ impl SessionService {
                 &selected_context,
                 staged_history.rolling_summary(),
             ),
-            messages: staged_history.messages_with_current(&text),
+            messages,
         };
         let answer_sink = Arc::new(RetainingStreamSink::new(sink, MAX_RETAINED_ASSISTANT_BYTES));
         let completed = runtime
@@ -247,7 +297,7 @@ impl SessionService {
             return Err(cancellation_error());
         }
         let mut completed_history = staged_history;
-        completed_history.append_completed(text, answer_sink.retained_text());
+        completed_history.append_completed(content.text, answer_sink.retained_text());
         Ok((completed, completed_history))
     }
 
@@ -293,12 +343,16 @@ impl SessionService {
         &self,
         request_id: RequestId,
         cancellation: CancellationToken,
+        requires_prior_intent: bool,
     ) -> Result<SessionHistory, ManualAssistanceError> {
         let mut state = self.state_lock();
         if state.lifecycle == SessionLifecycle::Processing || state.active.is_some() {
             return Err(ManualAssistanceError::Busy);
         }
         let history = state.history.clone();
+        if requires_prior_intent && history.latest_user_intent().is_none() {
+            return Err(ManualAssistanceError::NoPreviousRequest);
+        }
         state.lifecycle = SessionLifecycle::Processing;
         state.active = Some(ActiveRequest {
             request_id,
@@ -371,6 +425,8 @@ pub enum ManualAssistanceError {
     EmptyInput,
     #[error("Manual input exceeds the 16 KiB limit")]
     InputTooLarge,
+    #[error("Ask a text question before sending a screenshot")]
+    NoPreviousRequest,
     #[error("A manual request is already active")]
     Busy,
     #[error("Manual assistance is not configured: {message}")]
@@ -768,8 +824,18 @@ mod tests {
         assert_eq!(state.history.recent_turn_count(), 9);
         let messages = state.history.messages_with_current("current");
         assert_eq!(messages.len(), 19);
-        assert!(messages[0].content.starts_with("Question 0: "));
-        assert!(messages[16].content.starts_with("Question 8: "));
+        assert!(
+            messages[0]
+                .text_content()
+                .expect("history message is text")
+                .starts_with("Question 0: ")
+        );
+        assert!(
+            messages[16]
+                .text_content()
+                .expect("history message is text")
+                .starts_with("Question 8: ")
+        );
         assert_eq!(router.requests.lock().expect("captured requests").len(), 2);
     }
 

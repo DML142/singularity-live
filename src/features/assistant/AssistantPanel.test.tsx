@@ -2,7 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ManualAssistanceEvent } from "../../lib/tauri/manual-assistance-client";
+import type { CapturePreview } from "../../lib/tauri/screen-assistance-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
+import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
 import { AssistantPanel } from "./AssistantPanel";
 
 const client = vi.hoisted(() => ({
@@ -11,6 +13,13 @@ const client = vi.hoisted(() => ({
   cancel: vi.fn(),
   reset: vi.fn(),
   subscribe: vi.fn(),
+  screenCapabilities: vi.fn(),
+  screenTargets: vi.fn(),
+  screenCapture: vi.fn(),
+  screenCancel: vi.fn(),
+  screenCrop: vi.fn(),
+  screenDiscard: vi.fn(),
+  screenshotSend: vi.fn(),
 }));
 
 vi.mock("../../lib/tauri/manual-assistance-client", () => ({
@@ -20,9 +29,30 @@ vi.mock("../../lib/tauri/manual-assistance-client", () => ({
   resetManualAssistanceSession: client.reset,
   subscribeManualAssistanceEvents: client.subscribe,
 }));
+vi.mock("../../lib/tauri/screen-assistance-client", () => ({
+  cancelScreenCapture: client.screenCancel,
+  cropScreenCapture: client.screenCrop,
+  discardScreenCapture: client.screenDiscard,
+  getScreenCaptureCapabilities: client.screenCapabilities,
+  listScreenCaptureTargets: client.screenTargets,
+  newCaptureOperationId: () => "00000000-0000-4000-8000-000000000001",
+  screenCaptureErrorMessage: (error: { code?: string }) =>
+    error.code === "permissionDenied"
+      ? "Screen capture permission was denied"
+      : "Capture failed",
+  startScreenCapture: client.screenCapture,
+  startScreenshotAssistance: client.screenshotSend,
+}));
 
 let receiveEvent: ((event: ManualAssistanceEvent) => void) | undefined;
 let requestNumber = 0;
+const screenshot: CapturePreview = {
+  captureId: "00000000-0000-4000-8000-000000000002",
+  dataUrl: "data:image/png;base64,AAEC",
+  width: 2,
+  height: 2,
+  expiresInSeconds: 300,
+};
 
 describe("manual assistant panel", () => {
   beforeEach(() => {
@@ -31,6 +61,13 @@ describe("manual assistant panel", () => {
     client.cancel.mockReset();
     client.reset.mockReset();
     client.subscribe.mockReset();
+    client.screenCapabilities.mockReset();
+    client.screenTargets.mockReset();
+    client.screenCapture.mockReset();
+    client.screenCancel.mockReset();
+    client.screenCrop.mockReset();
+    client.screenDiscard.mockReset();
+    client.screenshotSend.mockReset();
     receiveEvent = undefined;
     client.getReadiness.mockResolvedValue({
       status: "ready",
@@ -44,6 +81,22 @@ describe("manual assistant panel", () => {
     });
     client.cancel.mockResolvedValue(undefined);
     client.reset.mockResolvedValue(undefined);
+    client.screenCapabilities.mockResolvedValue({
+      targets: ["monitor", "window"],
+      permission: "user_prompt",
+      message: null,
+    });
+    client.screenTargets.mockResolvedValue([
+      { id: "monitor:1", label: "Display 1", kind: "monitor" },
+    ]);
+    client.screenCapture.mockResolvedValue(screenshot);
+    client.screenCancel.mockResolvedValue(undefined);
+    client.screenCrop.mockResolvedValue(screenshot);
+    client.screenDiscard.mockResolvedValue(undefined);
+    client.screenshotSend.mockImplementation(() => {
+      requestNumber += 1;
+      return Promise.resolve(`request-${String(requestNumber)}`);
+    });
     client.subscribe.mockImplementation(
       (listener: (event: ManualAssistanceEvent) => void) => {
         receiveEvent = listener;
@@ -61,6 +114,16 @@ describe("manual assistant panel", () => {
       resetError: null,
       turns: [],
       activeTurnId: null,
+    });
+    useScreenAssistanceStore.setState({
+      phase: "loading",
+      capabilities: null,
+      targetKind: "monitor",
+      targets: [],
+      selectedTargetId: "",
+      operationId: null,
+      preview: null,
+      error: null,
     });
   });
 
@@ -413,5 +476,133 @@ describe("manual assistant panel", () => {
     expect(screen.getByText("Question to preserve")).toBeInTheDocument();
     expect(screen.getByText("Answer to preserve")).toBeInTheDocument();
     expect(screen.queryByText("sensitive provider detail")).not.toBeInTheDocument();
+  });
+
+  it("captures only after the user chooses a source and sends the reviewed preview", async () => {
+    client.start.mockResolvedValueOnce("request-context");
+    render(<AssistantPanel />);
+    const composer = await screen.findByRole("textbox", { name: "Ask for assistance" });
+    fireEvent.change(composer, { target: { value: "What does this Rust code do?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(client.start).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      receiveEvent?.({ type: "started", requestId: "request-context" });
+      receiveEvent?.({
+        type: "textDelta",
+        requestId: "request-context",
+        delta: "Send the code and I can explain it.",
+      });
+      receiveEvent?.({
+        type: "completed",
+        requestId: "request-context",
+        provider: "open_router",
+        model: "openrouter/free",
+        usage: null,
+      });
+      await Promise.resolve();
+    });
+    await screen.findByRole("button", { name: "Choose source" });
+
+    expect(client.screenCapture).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
+    await screen.findByRole("button", { name: "Capture screen" });
+    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
+
+    expect(
+      await screen.findByRole("img", { name: /Temporary screenshot preview/ }),
+    ).toBeInTheDocument();
+    expect(client.screenCapture).toHaveBeenCalledWith(
+      "monitor:1",
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(client.screenshotSend).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send screenshot" }));
+    await waitFor(() => {
+      expect(client.screenshotSend).toHaveBeenCalledWith(screenshot.captureId);
+    });
+    await screen.findByText("Screenshot sent with the previous text request");
+    expect(
+      screen.queryByRole("img", { name: /Temporary screenshot preview/ }),
+    ).not.toBeInTheDocument();
+    expect(useManualAssistanceStore.getState().turns.at(-1)?.prompt).toBe(
+      "Continue answering the previous request using the attached screenshot.",
+    );
+  });
+
+  it("explains when the selected source type has no available targets", async () => {
+    client.screenTargets.mockResolvedValueOnce([]);
+    render(<AssistantPanel />);
+    await screen.findByRole("button", { name: "Choose source" });
+    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
+
+    expect(
+      await screen.findByText(/No screens are available for capture/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Capture screen" })).toBeNull();
+  });
+
+  it("discards preview pixels and releases them when the panel unmounts", async () => {
+    const { unmount } = render(<AssistantPanel />);
+    await screen.findByRole("button", { name: "Choose source" });
+    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
+    await screen.findByRole("button", { name: "Capture screen" });
+    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
+    await screen.findByRole("img", { name: /Temporary screenshot preview/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => {
+      expect(client.screenDiscard).toHaveBeenCalledWith(screenshot.captureId);
+    });
+    expect(
+      screen.queryByRole("img", { name: /Temporary screenshot preview/ }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
+    await screen.findByRole("img", { name: /Temporary screenshot preview/ });
+    unmount();
+
+    expect(client.screenDiscard).toHaveBeenCalledTimes(2);
+    expect(useScreenAssistanceStore.getState().preview).toBeNull();
+  });
+
+  it("shows a permission denial and supports cancelling an in-progress capture", async () => {
+    client.screenCapabilities.mockResolvedValueOnce({
+      targets: ["monitor"],
+      permission: "denied",
+      message: null,
+    });
+    const denied = render(<AssistantPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Screen capture permission was denied",
+    );
+    denied.unmount();
+
+    let rejectCapture: ((error: { code: string }) => void) | undefined;
+    client.screenCapture.mockReturnValueOnce(
+      new Promise<CapturePreview>((_resolve, reject) => {
+        rejectCapture = reject;
+      }),
+    );
+    render(<AssistantPanel />);
+    await screen.findByRole("button", { name: "Choose source" });
+    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
+    await screen.findByRole("button", { name: "Capture screen" });
+    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel capture" }));
+
+    expect(client.screenCancel).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    await act(async () => {
+      rejectCapture?.({ code: "cancelled" });
+      await Promise.resolve();
+    });
+    expect(await screen.findByText("Screenshot capture cancelled")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: /Temporary screenshot preview/ }),
+    ).not.toBeInTheDocument();
   });
 });

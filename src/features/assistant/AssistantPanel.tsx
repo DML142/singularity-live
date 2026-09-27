@@ -3,13 +3,16 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type PointerEvent,
   type SubmitEvent,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { WorkspacePanel } from "../../components/ui/WorkspacePanel";
+import type { CropRect } from "../../lib/tauri/screen-assistance-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
+import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
 
 export function AssistantPanel() {
   const readiness = useManualAssistanceStore((state) => state.readiness);
@@ -22,9 +25,38 @@ export function AssistantPanel() {
   const start = useManualAssistanceStore((state) => state.start);
   const cancel = useManualAssistanceStore((state) => state.cancel);
   const resetSession = useManualAssistanceStore((state) => state.resetSession);
+  const screenPhase = useScreenAssistanceStore((state) => state.phase);
+  const screenCapabilities = useScreenAssistanceStore((state) => state.capabilities);
+  const screenTargetKind = useScreenAssistanceStore((state) => state.targetKind);
+  const screenTargets = useScreenAssistanceStore((state) => state.targets);
+  const selectedScreenTargetId = useScreenAssistanceStore(
+    (state) => state.selectedTargetId,
+  );
+  const captureOperationId = useScreenAssistanceStore((state) => state.operationId);
+  const screenPreview = useScreenAssistanceStore((state) => state.preview);
+  const screenError = useScreenAssistanceStore((state) => state.error);
+  const loadScreenCapabilities = useScreenAssistanceStore(
+    (state) => state.loadCapabilities,
+  );
+  const loadScreenTargets = useScreenAssistanceStore((state) => state.loadTargets);
+  const selectScreenTarget = useScreenAssistanceStore((state) => state.selectTarget);
+  const captureScreen = useScreenAssistanceStore((state) => state.capture);
+  const cancelScreenCapture = useScreenAssistanceStore((state) => state.cancelCapture);
+  const cropScreen = useScreenAssistanceStore((state) => state.crop);
+  const discardScreen = useScreenAssistanceStore((state) => state.discard);
+  const sendScreen = useScreenAssistanceStore((state) => state.send);
+  const clearScreenOnUnmount = useScreenAssistanceStore(
+    (state) => state.clearOnUnmount,
+  );
+  const clearScreenForReset = useScreenAssistanceStore(
+    (state) => state.clearForSessionReset,
+  );
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
+  const screenshotImageRef = useRef<HTMLImageElement>(null);
+  const cropStart = useRef<{ readonly x: number; readonly y: number } | null>(null);
+  const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const stickToBottom = useRef(true);
   const previousPhase = useRef(phase);
 
@@ -45,6 +77,13 @@ export function AssistantPanel() {
       unlisten?.();
     };
   }, [initialize]);
+
+  useEffect(() => {
+    void loadScreenCapabilities();
+    return () => {
+      void clearScreenOnUnmount();
+    };
+  }, [clearScreenOnUnmount, loadScreenCapabilities]);
 
   useEffect(() => {
     const wasActive =
@@ -88,6 +127,71 @@ export function AssistantPanel() {
   };
 
   const busy = phase === "starting" || phase === "streaming";
+  const hasPriorConversation = turns.some((turn) => turn.phase === "completed");
+  const screenBusy =
+    screenPhase === "loadingTargets" ||
+    screenPhase === "capturing" ||
+    screenPhase === "cropping" ||
+    screenPhase === "sending";
+  const screenshotPoint = (event: PointerEvent<HTMLImageElement>) => {
+    const image = event.currentTarget;
+    const bounds = image.getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0 || screenPreview === null) {
+      return null;
+    }
+    return {
+      x: Math.max(
+        0,
+        Math.min(
+          screenPreview.width,
+          Math.round(
+            ((event.clientX - bounds.left) / bounds.width) * screenPreview.width,
+          ),
+        ),
+      ),
+      y: Math.max(
+        0,
+        Math.min(
+          screenPreview.height,
+          Math.round(
+            ((event.clientY - bounds.top) / bounds.height) * screenPreview.height,
+          ),
+        ),
+      ),
+    };
+  };
+  const beginCropSelection = (event: PointerEvent<HTMLImageElement>) => {
+    const point = screenshotPoint(event);
+    if (point !== null && screenPreview !== null) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      cropStart.current = point;
+      setCropRect({ x: point.x, y: point.y, width: 1, height: 1 });
+    }
+  };
+  const updateCropSelection = (event: PointerEvent<HTMLImageElement>) => {
+    const startPoint = cropStart.current;
+    const endPoint = screenshotPoint(event);
+    if (startPoint === null || endPoint === null) {
+      return;
+    }
+    setCropRect({
+      x: Math.min(startPoint.x, endPoint.x),
+      y: Math.min(startPoint.y, endPoint.y),
+      width: Math.abs(startPoint.x - endPoint.x),
+      height: Math.abs(startPoint.y - endPoint.y),
+    });
+  };
+  const endCropSelection = (event: PointerEvent<HTMLImageElement>) => {
+    updateCropSelection(event);
+    cropStart.current = null;
+  };
+  const resetSessionAndScreenshot = async () => {
+    setCropRect(null);
+    if (await resetSession()) {
+      clearScreenForReset();
+    }
+  };
   const detail =
     readiness.phase === "ready"
       ? readiness.value.model
@@ -133,7 +237,7 @@ export function AssistantPanel() {
                 className="assistant-new-session"
                 type="button"
                 onClick={() => {
-                  void resetSession();
+                  void resetSessionAndScreenshot();
                 }}
                 disabled={busy || resetPending}
               >
@@ -145,6 +249,251 @@ export function AssistantPanel() {
                 </p>
               ) : null}
             </div>
+            <section className="screen-assistance" aria-label="Screen assistance">
+              <div className="screen-assistance-heading">
+                <div>
+                  <p className="screen-assistance-title">Temporary screen help</p>
+                  <p className="screen-assistance-copy">
+                    Capture only when you choose, review it, then send it with the
+                    previous text request.
+                  </p>
+                </div>
+                {screenCapabilities?.permission === "user_prompt" ? (
+                  <span className="screen-permission-hint">
+                    System approval may be requested
+                  </span>
+                ) : null}
+              </div>
+
+              {screenPhase === "loading" ? (
+                <p className="screen-assistance-status" role="status">
+                  Checking screen capture support…
+                </p>
+              ) : screenPhase === "unavailable" || screenCapabilities === null ? (
+                <p className="screen-assistance-error" role="alert">
+                  {screenError ?? "Screen capture support is unavailable"}
+                </p>
+              ) : screenCapabilities.permission === "denied" ? (
+                <p className="screen-assistance-error" role="alert">
+                  Screen capture permission was denied. Check system privacy settings.
+                </p>
+              ) : screenCapabilities.targets.length === 0 ? (
+                <p className="screen-assistance-error" role="alert">
+                  {screenCapabilities.message ??
+                    "Screen capture is unavailable on this desktop"}
+                </p>
+              ) : (
+                <>
+                  <div className="screen-assistance-controls">
+                    <label className="screen-source-label" htmlFor="screen-source-kind">
+                      Source
+                    </label>
+                    <select
+                      id="screen-source-kind"
+                      value={screenTargetKind}
+                      disabled={
+                        screenBusy || screenPreview !== null || busy || resetPending
+                      }
+                      onChange={(event) => {
+                        setCropRect(null);
+                        const kind = event.currentTarget.value;
+                        if (kind === "monitor" || kind === "window") {
+                          void loadScreenTargets(kind);
+                        }
+                      }}
+                    >
+                      {screenCapabilities.targets.includes("monitor") ? (
+                        <option value="monitor">Screen</option>
+                      ) : null}
+                      {screenCapabilities.targets.includes("window") ? (
+                        <option value="window">Window</option>
+                      ) : null}
+                    </select>
+                    <button
+                      className="screen-secondary-action"
+                      type="button"
+                      onClick={() => {
+                        void loadScreenTargets(screenTargetKind);
+                      }}
+                      disabled={
+                        screenBusy || screenPreview !== null || busy || resetPending
+                      }
+                    >
+                      {screenPhase === "loadingTargets"
+                        ? "Loading sources…"
+                        : "Choose source"}
+                    </button>
+                    {screenPhase === "capturing" ? (
+                      <button
+                        className="screen-secondary-action"
+                        type="button"
+                        onClick={() => {
+                          void cancelScreenCapture();
+                        }}
+                        disabled={captureOperationId === null}
+                      >
+                        Cancel capture
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {screenTargets.length > 0 && screenPreview === null ? (
+                    <div className="screen-target-row">
+                      <label className="sr-only" htmlFor="screen-capture-target">
+                        Available{" "}
+                        {screenTargetKind === "monitor" ? "screens" : "windows"}
+                      </label>
+                      <select
+                        id="screen-capture-target"
+                        value={selectedScreenTargetId}
+                        disabled={screenBusy || busy || resetPending}
+                        onChange={(event) => {
+                          selectScreenTarget(event.currentTarget.value);
+                        }}
+                      >
+                        {screenTargets.map((target) => (
+                          <option key={target.id} value={target.id}>
+                            {target.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="screen-capture-action"
+                        type="button"
+                        onClick={() => {
+                          void captureScreen();
+                        }}
+                        disabled={screenBusy || busy || resetPending}
+                      >
+                        {screenTargetKind === "monitor"
+                          ? "Capture screen"
+                          : "Capture window"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {screenPhase === "selecting" && screenTargets.length === 0 ? (
+                    <p className="screen-assistance-status" role="status">
+                      No {screenTargetKind === "monitor" ? "screens" : "windows"} are
+                      available for capture. Try another source type.
+                    </p>
+                  ) : null}
+                </>
+              )}
+
+              {screenPhase === "capturing" ? (
+                <p
+                  className="screen-assistance-status"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Waiting for the screen capture to finish…
+                </p>
+              ) : null}
+              {screenError !== null ? (
+                <p className="screen-assistance-error" role="alert">
+                  {screenError}
+                </p>
+              ) : null}
+              {screenPhase === "cancelled" ? (
+                <p className="screen-assistance-status" role="status">
+                  Screenshot capture cancelled
+                </p>
+              ) : null}
+              {screenPhase === "sent" ? (
+                <p className="screen-assistance-status" role="status">
+                  Screenshot sent with the previous text request
+                </p>
+              ) : null}
+              {screenPreview !== null ? (
+                <div className="screen-preview-card">
+                  <div className="screen-preview-header">
+                    <span>Preview · deleted automatically after five minutes</span>
+                    <span>
+                      {screenPreview.width} × {screenPreview.height}
+                    </span>
+                  </div>
+                  <div className="screen-preview-image-wrap">
+                    <img
+                      ref={screenshotImageRef}
+                      className="screen-preview-image"
+                      src={screenPreview.dataUrl}
+                      alt="Temporary screenshot preview. Drag to select an area to crop."
+                      draggable={false}
+                      onPointerDown={beginCropSelection}
+                      onPointerMove={updateCropSelection}
+                      onPointerUp={endCropSelection}
+                      onPointerCancel={endCropSelection}
+                    />
+                    {cropRect !== null && cropRect.width > 0 && cropRect.height > 0 ? (
+                      <div
+                        className="screen-crop-selection"
+                        aria-label="Selected screenshot area"
+                        style={{
+                          left: `${String((cropRect.x / screenPreview.width) * 100)}%`,
+                          top: `${String((cropRect.y / screenPreview.height) * 100)}%`,
+                          width: `${String((cropRect.width / screenPreview.width) * 100)}%`,
+                          height: `${String((cropRect.height / screenPreview.height) * 100)}%`,
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                  <p className="screen-assistance-copy">
+                    Drag over a region to crop it, or send the full preview with your
+                    previous question.
+                  </p>
+                  {!hasPriorConversation ? (
+                    <p className="screen-assistance-status" role="status">
+                      Ask a text question and wait for its response before sending a
+                      screenshot.
+                    </p>
+                  ) : null}
+                  <div className="screen-preview-actions">
+                    <button
+                      className="screen-secondary-action"
+                      type="button"
+                      onClick={() => {
+                        if (cropRect !== null) {
+                          setCropRect(null);
+                          void cropScreen(cropRect);
+                        }
+                      }}
+                      disabled={
+                        cropRect === null ||
+                        cropRect.width < 1 ||
+                        cropRect.height < 1 ||
+                        screenBusy
+                      }
+                    >
+                      Crop selected area
+                    </button>
+                    <button
+                      className="screen-capture-action"
+                      type="button"
+                      onClick={() => {
+                        setCropRect(null);
+                        void sendScreen();
+                      }}
+                      disabled={
+                        !hasPriorConversation || busy || resetPending || screenBusy
+                      }
+                    >
+                      Send screenshot
+                    </button>
+                    <button
+                      className="screen-secondary-action"
+                      type="button"
+                      onClick={() => {
+                        setCropRect(null);
+                        void discardScreen();
+                      }}
+                      disabled={screenBusy}
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
             <div
               ref={conversationRef}
               className="assistant-conversation"

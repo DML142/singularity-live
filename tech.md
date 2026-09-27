@@ -93,12 +93,13 @@ and delegate; they do not contain business logic. Infrastructure adapters know t
 external APIs. Domain types do not know React, individual providers, SQLite, xcap, or
 WASAPI.
 
-The current vertical slice contains application status and manual text assistance. Manual
-requests pass through narrow Tauri commands to a Rust session service, which loads selected
-context and sends bounded role-tagged conversation history through the configured
-provider-independent router. One process-local session keeps successful turns and a rolling
-summary until reset or application restart. Future directories are created when code exists
-for them.
+The current vertical slice contains application status, manual text assistance, and explicit
+screen assistance. Requests pass through narrow Tauri commands to Rust services. The session
+service loads selected context and sends bounded role-tagged conversation history through the
+configured provider-independent router; a screenshot request adds one temporary image to
+that request. One process-local session keeps successful text turns and a rolling summary
+until reset or application restart. Future directories are created when code exists for
+them.
 
 ## 6. Frontend responsibilities
 
@@ -108,6 +109,8 @@ React owns:
 - local interaction and focused UI state;
 - the manual request composer, incremental rendering of backend event streams, and a new
   session action that clears the visible conversation only after Rust confirms reset;
+- visible screen-assistance capability and permission states, explicit source selection and
+  capture, temporary preview/crop, and separate send or discard actions;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -130,14 +133,16 @@ Rust owns:
 - image preprocessing and system shortcuts;
 - safe error mapping and structured technical logging.
 
-Rust exposes `get_app_status` and four manual-assistance commands for readiness, request
-start, cancellation, and session reset. `SessionService` validates text, selects relevant
-static context, composes bounded system and role-tagged conversation messages, summarizes
-older completed turns through the existing router when limits require it, permits one active
-request, and returns typed failures. Provider networking, context loading, configuration,
-credential lookup, session state, and cancellation stay in Rust. Startup uses `expect` only
-for the invariant that a Tauri application must initialize to run; runtime or user-controlled
-operations return typed errors.
+Rust exposes `get_app_status`, the manual-assistance commands, and narrow screen-assistance
+commands for capability reporting, target listing, explicit capture, capture cancellation,
+crop, discard, and screenshot-assisted requests. `SessionService` validates text, selects
+relevant static context, composes bounded system and role-tagged conversation messages,
+summarizes older completed turns through the existing router when limits require it, permits
+one active request, and returns typed failures. Capture, image processing, provider
+networking, context loading, configuration, credential lookup, session state, cancellation,
+and image deletion stay in Rust. Startup uses `expect` only for the invariant that a Tauri
+application must initialize to run; runtime or user-controlled operations return typed
+errors.
 
 ## 8. Security boundaries
 
@@ -147,22 +152,24 @@ be narrow and typed—never a generic action dispatcher, filesystem gateway, she
 HTTP proxy, or SQL endpoint.
 
 Tauri capabilities grant only application commands declared in the Rust build manifest;
-the main window receives `allow-get-app-status`, `allow-get-manual-assistance-readiness`,
-`allow-start-manual-assistance`, `allow-cancel-manual-assistance`, and
-`allow-reset-session`, plus `core:event:allow-listen` and `core:event:allow-unlisten` for the
-streaming UI. It receives no plugin permissions. Provider keys never enter Vite environment
-variables, localStorage,
-Zustand, logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for
-local development only; OS-backed credential storage remains future security work.
+the main window receives the five application and manual-assistance permissions and the
+screen commands `get_screen_capture_capabilities`, `list_screen_capture_targets`,
+`start_screen_capture`, `cancel_screen_capture`, `crop_screen_capture`,
+`discard_screen_capture`, and `start_screenshot_assistance`. It also receives
+`core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
+permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
+logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
+development only; OS-backed credential storage remains future security work.
 
 Sensitive content is excluded from logs by default. API keys, authorization headers, raw
 audio, screenshots, full context packs, and full provider payloads must not be logged.
 
 ## 9. Provider architecture
 
-Planned capability ports include speech-to-text, text generation, vision, and multimodal
-generation. Text generation currently has one direct OpenRouter adapter; OpenRouter is an
-infrastructure choice, not a domain dependency.
+Planned capability ports include speech-to-text and broader multimodal generation. Text
+generation currently has one direct OpenRouter adapter; it supports provider-neutral still
+image parts for the explicit screenshot request path. OpenRouter is an infrastructure
+choice, not a domain dependency.
 
 ```mermaid
 flowchart LR
@@ -196,23 +203,27 @@ Context selection is layered:
 4. the current text, speech, or screenshot input.
 
 The current deterministic selector preserves manifest order and includes `always_include`
-documents plus documents whose configured complete keyword or phrase occurs in normalized
-manual input. It avoids sending non-matching documents. A Rust-owned session also includes
+documents plus documents whose configured complete keyword or phrase occurs in the text
+request or the prior text intent for a screenshot. It avoids sending non-matching documents.
+A Rust-owned session also includes
 prior successful user and assistant messages in chronological order and automatically
-compacts older turns into a rolling summary when recent history exceeds either bound. The
-current request is the final user message; the summary and selected static documents are
-placed in the system prompt. Image, audio, transcript, and other unsupported inputs do not
-enter the session in this stage.
+compacts older turns into a rolling summary when recent history exceeds either bound. A
+screenshot follow-up selects static context using the most recent text intent, includes prior
+role-tagged messages, and sends the current image only in that request. Completed history and
+rolling summaries retain text only. Audio, transcript, and other unsupported inputs do not
+enter the session.
 
 ## 11. Session architecture
 
 One process-local `SessionService` owns a generated session ID, `Idle`/`Active`/`Processing`
-lifecycle, completed manual-text exchanges, a rolling summary, and the active request's
-cancellation token under one state lock. Only successfully completed exchanges enter model
-context. A failure or cancellation leaves prior turns available and excludes any partial
-answer. Reset is rejected while processing; otherwise it clears recent turns and summary
-and returns to an idle session with a fresh ID. A process restart also begins with an empty
-session.
+lifecycle, completed text exchanges, a rolling summary, and the active request's cancellation
+token under one state lock. A screenshot request includes a temporary image in the current
+provider message but stores only its text continuation prompt and completed text answer after
+success. Only successfully completed text exchanges enter later model context. A failure or
+cancellation leaves prior turns available, excludes any partial answer, and releases the
+image. Reset is rejected while processing; otherwise it clears recent turns and summary and
+returns to an idle session with a fresh ID. Reset also deletes any pending screenshot. A
+process restart begins with an empty session and no retained image.
 
 Current manual input is capped at 16 KiB. Recent history is capped at 8 exchanges and
 16 KiB, the system context at 20 KiB, the rolling summary at 4 KiB, each retained assistant
@@ -222,10 +233,12 @@ replaces the stored summary and removed turns only after every required summary 
 succeeds. Context pack loading runs on a blocking worker; provider and summary calls honor
 request cancellation.
 
-The session is deliberately volatile and has no event or chat-history persistence. It
-does not introduce multiple chats, SQLite, image or audio inputs, transcription, or response
-modes. Future session event records may use stable IDs, timestamps, source, and kind, but a
-durable event log is not part of the current implementation.
+The session is deliberately volatile and has no event or chat-history persistence. It does
+not introduce multiple chats, SQLite, audio inputs, transcription, or response modes. A
+single explicitly submitted screenshot may accompany one provider request and is deleted
+afterward; images do not enter session history. Future session event records may use stable
+IDs, timestamps, source, and kind, but a durable event log is not part of the current
+implementation.
 
 ## 12. Storage plan
 
@@ -249,16 +262,20 @@ VAD is local and selected later using latency, CPU, packaging, portability, and 
 evidence. Raw audio is transient by default: capture, segment, transcribe, discard. Audio
 capture, VAD, and speech-to-text are not implemented in Phase 0.
 
-## 14. Screenshot plan
+## 14. Screenshot assistance
 
-Capture runs in Rust and will support explicit monitor, window where available, and region
-selection. A platform adapter—initially evaluating xcap—will normalize metadata and feed
-resize/compression preprocessing. Vision requests combine the temporary image with selected
-current and persistent context.
+Capture runs in Rust after an explicit user action. XCap provides one-shot monitor and window
+capture on Windows, macOS, and X11. Linux Wayland uses the visible XDG ScreenCast picker and
+one PipeWire frame with portal persistence disabled; unsupported backends report that state.
+Region selection crops the reviewed in-memory preview. Rust bounds dimensions and encoded
+size, while the UI displays a temporary preview and requires a separate send action.
 
-Temporary images are released after processing. A saved attachment is a separate explicit
-state. OCR is deferred until benchmarks show a benefit for indexing, local extraction, or
-cost reduction. Screenshot capture is not implemented in Phase 0.
+One image remains in an in-memory Rust store for no more than five minutes. Send, discard,
+replacement, reset, cancellation, processing errors, expiry, and process exit release its
+bytes. The provider request combines it with the previous text intent and role-tagged text
+context, while completed session history keeps text only. Images and preview data are never
+persisted or logged. OCR is deferred until benchmarks show a benefit for indexing, local
+extraction, or cost reduction.
 
 ## 15. Testing strategy
 
@@ -267,9 +284,10 @@ cost reduction. Screenshot capture is not implemented in Phase 0.
   duplicate submission, keyboard behavior, cancellation, failure recovery, and focus.
 - Rust domain and application behavior uses unit and integration tests.
 - The OpenRouter adapter uses a local mock HTTP server for request mapping, SSE parsing,
-  provider error classification, timeout, and cancellation. Session tests use a fake router
-  for follow-up context, bounds and summaries, relevance filtering, reset, cancellation, and
-  recovery after failures. Automated tests need no API key and make no provider calls.
+  still-image serialization, provider error classification, timeout, and cancellation.
+  Capture tests use fake backends; session tests use a fake router for follow-up context,
+  screenshot composition, bounds and summaries, relevance filtering, reset, cancellation,
+  and recovery after failures. Automated tests need no API key and make no provider calls.
 - Tests protect observable behavior, not private structure or prose.
 - CI runs formatting, linting, type checking, tests, and builds for the current foundation.
 
@@ -360,8 +378,8 @@ streaming request path, manual input UI, tests, and relevant ADRs.
 context schemas validate; adapters and failure mapping are tested; docs match implementation;
 a real desktop request is verified when a user-supplied development credential is available.
 
-**Status:** In progress — implementation and automated checks are complete; live OpenRouter
-request verification has not been performed.
+**Status:** Completed — implementation and automated checks are complete; the user manually
+verified a real desktop OpenRouter request with text context on 2026-09-26.
 
 ### Phase 2 — Screen understanding
 
@@ -379,7 +397,11 @@ UI, permission/error states, and privacy tests.
 **Acceptance criteria:** Users explicitly trigger capture; temporary images are deleted;
 unsupported capabilities are clear; screenshot + text context produces a tested result.
 
-**Status:** Not started
+**Status:** Completed — mock-backed Rust and UI tests cover explicit capture and preview,
+permissions and unsupported states, bounded transient image lifetime and deletion, the
+previous text request plus screenshot through the provider boundary, safe errors, and
+cancellation. Full project checks passed on 2026-09-26; automated validation used neither
+live provider requests nor real screen captures.
 
 ### Phase 3 — Audio and transcription
 
@@ -416,8 +438,9 @@ context is excluded; cancellation is reliable; lifecycle/error states are explic
 
 **Status:** In progress — the manual-text session has bounded role-tagged history, automatic
 static-context selection, provider-mediated rolling summaries, lifecycle reset, and
-cancellation/error coverage. Screenshot and transcript composition, response modes, and
-other unsupported inputs remain unimplemented.
+cancellation/error coverage. The Phase 2 screenshot path now composes one temporary image
+with prior text intent and context. Transcript composition, response modes, broader
+multimodal session behavior, and other unsupported inputs remain unimplemented.
 
 ### Phase 5 — Persistence and context management
 
@@ -486,6 +509,12 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
   reset lifecycle that rejects active requests.
 - Accessible **New session** action that waits for Rust reset confirmation before clearing
   visible turns and preserves the conversation with a safe error if reset fails.
+- Explicit screen assistance with capability and permission states, monitor/window target
+  selection, validated region crop, in-memory preview, separate send/discard actions, and
+  cleanup on expiry, reset, unmount, errors, and cancellation.
+- Rust-only platform capture adapters, bounded image preparation, a five-minute transient
+  image store, request-scoped image parts through the provider-neutral router, and an
+  OpenRouter still-image mapping that preserves text-only request compatibility.
 - Typed clients for application status and manual-assistance IPC; unknown event payloads are
   validated at runtime and stale request IDs are ignored.
 - Rust application-status service and `SessionService` with one active request.
@@ -494,9 +523,9 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 - Typed OpenRouter configuration, Rust-only environment secret lookup, provider-independent
   text-generation ports, router, streaming adapter, timeout, cancellation, and safe failure
   classification.
-- Explicit permissions for the five implemented application commands and event listening
-  and cleanup, no Tauri plugin permissions, and a production content security policy without
-  `unsafe-inline`.
+- Explicit permissions for the implemented application and screen-assistance commands and
+  event listening and cleanup, no Tauri plugin permissions, and a production content security
+  policy without `unsafe-inline`.
 - Fictional context-pack example, OpenRouter setup instructions, and a focused provider and
   credential-boundary ADR.
 - Frontend behavior test, formatting, lint, type checking, build scripts, and CI.
@@ -507,8 +536,8 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 ### Architecturally planned, not implemented
 
 Additional provider adapters, OS-backed credential storage, multiple chats, persisted
-session history, screenshots, audio, VAD, transcription, SQLite, history management,
-shortcuts, tray, compact mode, updater, signing, and production packaging.
+session history, audio, VAD, transcription, OCR, SQLite, history management, shortcuts, tray,
+compact mode, updater, signing, and production packaging.
 
 ### Phase 0 validation record
 
@@ -526,26 +555,39 @@ through WebKitGTK's development inspector; no capture or provider permissions we
 ### Context and provider validation record
 
 Automated tests use local fixtures and mock HTTP responses; they do not need
-`OPENROUTER_API_KEY` and do not make live or paid provider calls. A live OpenRouter request
-has not been verified in this workspace, so Phase 1 remains in progress.
+`OPENROUTER_API_KEY` and do not make live or paid provider calls. The user manually verified
+the real desktop OpenRouter text-context flow on 2026-09-26; this satisfies Phase 1's final
+acceptance criterion.
 
 | Check                                                                                 | Result                                                                                  |
 | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 pnpm check` | Passed on 2026-09-25: 11 frontend tests, 47 Rust tests, lint, types, builds, and checks |
 | Tauri development startup                                                             | Built and started the native binary with provider configuration explicitly unset        |
-| Live OpenRouter request                                                               | Not run; `OPENROUTER_API_KEY` was not configured in the shell environment               |
+| Live OpenRouter request                                                               | User manually verified real desktop text-context assistance on 2026-09-26               |
 
 ### Session intelligence validation record
 
-This stage adds one volatile manual-text session. It does not complete Phase 4: screenshot
-and transcript inputs, multimodal composition, and response modes remain planned. All
-provider tests use local mocks or a fake router; no live OpenRouter call is required.
+This stage adds one volatile manual-text session. It does not complete Phase 4: broader
+multimodal composition, transcript inputs, and response modes remain planned. All provider
+tests use local mocks or a fake router; no live OpenRouter call is required.
 
 | Check                               | Result                                                                                                               |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Rust backend tests                  | Passed: 66 tests, including follow-up, bounds, compaction, relevance, reset, cancellation, and recovery              |
 | Frontend reset and transcript tests | Passed: 14 targeted tests covering reset IPC, success ordering, busy state, and failure preservation                 |
 | Full project `pnpm check`           | Passed on 2026-09-25: 17 frontend tests, 66 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check |
+
+### Screen assistance validation record
+
+All provider-facing tests use local mock HTTP responses or a fake Rust router. The run did
+not send a live provider request or capture a real desktop image.
+
+| Check                                         | Result                                                                                                                                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend tests                                | Passed: 25 tests across 4 files                                                                                                                                            |
+| Rust tests                                    | Passed: 94 tests, including capability/permission states, expiry/deletion, screenshot plus prior text context, provider errors/cancellation, and PipeWire frame conversion |
+| Full project `pnpm check`                     | Passed on 2026-09-26: formatting, ESLint, TypeScript, frontend tests, production build, Rust fmt/Clippy/tests, and Cargo check                                             |
+| Live provider request and real screen capture | Not performed; automated acceptance used mocks and in-memory pixel fixtures                                                                                                |
 
 ### Toolchain and tested versions
 
