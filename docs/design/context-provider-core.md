@@ -7,30 +7,30 @@ React remains an untrusted presentation layer. Rust owns context loading, config
 credentials, provider networking, routing, cancellation, timeout enforcement, and error
 classification.
 
-This design implements only persistent context packs and manual text generation. Capture,
-audio, history, rolling summaries, fallback routing, settings UI, and OS-backed credential
-storage remain outside this change.
+This design describes persistent context packs and manual generation used by text and
+explicit screenshot assistance. Audio, fallback routing, settings UI, and OS-backed
+credential storage remain outside this boundary.
 
 ## Provider approach
 
-Three approaches were considered:
+The initial design considered three approaches:
 
 1. A direct OpenRouter adapter behind a provider-independent text-generation port.
 2. A configurable OpenAI-compatible HTTP adapter that accepts arbitrary endpoints.
 3. Multiple provider adapters in the first implementation.
 
-The implementation uses the first approach. A direct adapter proves the router boundary
-while keeping authentication headers, endpoint selection, request DTOs, and streaming
-parsing confined to vendor-specific infrastructure. An arbitrary compatible endpoint would
-be too close to a generic HTTP proxy and would make configuration and security validation
-less precise. Multiple adapters would add testing and configuration breadth without adding
-capability required by the manual-text path.
+The implementation began with the first approach. It now has explicit direct OpenRouter and
+Gemini adapters behind the same provider-independent port. Each adapter owns its
+authentication header, endpoint, request and response DTOs, and streaming parser. The
+user-configurable model ID selects text, code, and image generation on the chosen provider;
+there is no automatic fallback. An arbitrary compatible endpoint would be too close to a
+generic HTTP proxy and would make configuration and security validation less precise.
 
 OpenRouter model identifiers remain configuration values. Documentation uses
-`openrouter/free` as a zero-cost development option, while allowing an explicit model slug
-when predictable behavior matters. The adapter uses OpenRouter's documented
-`POST /api/v1/chat/completions` streaming API and does not expose OpenRouter DTOs outside
-its module.
+`openrouter/free` as a development option, while allowing an explicit model slug when
+predictable behavior matters. The Gemini adapter accepts a Gemini model ID such as
+`gemini-3.8-flash` and calls Google's `streamGenerateContent` API with SSE. Both adapters
+keep vendor DTOs inside their modules.
 
 ## Rust architecture
 
@@ -40,13 +40,13 @@ The Rust core gains four focused areas:
   streamed events, completed responses, usage, and structured failure kinds.
 - `context`: strict manifest parsing, filesystem validation, deterministic selection, and
   prompt construction.
-- `providers`: the text-generation port, OpenRouter adapter, and configuration-driven
-  router.
+- `providers`: the text-generation port, OpenRouter and Gemini adapters, and
+  configuration-driven router.
 - `app`: the manual-assistance service and one-active-request coordinator used by Tauri
   commands.
 
 Commands translate typed IPC values and delegate to the application service. They do not
-load files, read environment variables, construct prompts, or call OpenRouter directly.
+load files, read environment variables, construct prompts, or call providers directly.
 
 ### Provider-independent request and event model
 
@@ -67,9 +67,9 @@ are not retried; this change adds no automatic retries or fallbacks.
 
 ### Router, timeout, and cancellation
 
-Typed configuration selects exactly one supported provider: `openrouter`. The router owns
-adapter selection and returns a configuration error for any unsupported value. This shape
-allows another explicit adapter later without introducing fallback policy now.
+Typed configuration selects exactly one supported provider: `openrouter` or `gemini`. The
+router owns adapter selection and returns a configuration error for any unsupported value.
+It does not introduce fallback policy.
 
 The manual-assistance coordinator permits one active request. Starting a second request
 returns a busy error. Each active provider stream has a bounded deadline after context
@@ -82,14 +82,15 @@ request.
 
 Rust resolves non-secret configuration from process environment variables at startup:
 
-- `SINGULARITY_LIVE_PROVIDER` must be `openrouter`;
-- `SINGULARITY_LIVE_MODEL` is an OpenRouter model slug;
+- `SINGULARITY_LIVE_PROVIDER` must be `openrouter` or `gemini`;
+- `SINGULARITY_LIVE_MODEL` is a provider-specific model identifier;
 - `SINGULARITY_LIVE_CONTEXT_PACK` names the runtime pack directory;
 - `SINGULARITY_LIVE_REQUEST_TIMEOUT_SECONDS` is optional and has a documented bounded
   default.
 
-`OPENROUTER_API_KEY` is resolved through a Rust `SecretStore` port. The initial
-`EnvironmentSecretStore` is deliberately development-only. Its secret value is not
+`OPENROUTER_API_KEY` or `GEMINI_API_KEY`, according to the selected provider, is resolved
+through a Rust `SecretStore` port. The `EnvironmentSecretStore` is deliberately
+development-only. Its secret value is not
 serializable, is redacted from debug output, and never appears in command arguments,
 responses, events, logs, fixtures, snapshots, browser storage, React state, or Zustand.
 Persistent OS-backed credential storage remains later security work.

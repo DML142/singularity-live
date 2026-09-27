@@ -447,9 +447,15 @@ async fn classifies_connection_failures_as_transport_errors() {
         .await
         .expect("reserve local address");
     let address = listener.local_addr().expect("local address");
-    drop(listener);
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.expect("accept local request");
+        drop(socket);
+    });
     let adapter = OpenRouterAdapter::with_test_endpoint(
-        reqwest::Client::new(),
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("build direct HTTP client"),
         format!("http://{address}/api/v1/chat/completions"),
         Duration::from_secs(2),
     );
@@ -465,6 +471,7 @@ async fn classifies_connection_failures_as_transport_errors() {
         .expect_err("connection failure must be classified");
 
     assert_eq!(error.kind, ProviderErrorKind::Transport);
+    server.await.expect("local server closes the connection");
 }
 
 #[tokio::test]

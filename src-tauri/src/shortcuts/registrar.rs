@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex, MutexGuard},
 };
 
@@ -30,6 +30,7 @@ pub fn native_shortcut_expression(chord: &ShortcutChord) -> String {
     chord.canonical()
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub fn portal_preferred_trigger(chord: &ShortcutChord) -> Option<String> {
     let modifiers = chord
         .modifiers
@@ -51,6 +52,7 @@ pub fn portal_preferred_trigger(chord: &ShortcutChord) -> Option<String> {
     )
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn portal_key_name(code: &str) -> Option<&str> {
     if let Some(letter) = code.strip_prefix("Key") {
         return (letter.len() == 1 && letter.as_bytes()[0].is_ascii_uppercase()).then_some(letter);
@@ -148,7 +150,7 @@ impl TauriShortcutRegistrar {
                     activation();
                 }
             })
-            .map_err(|_| "This shortcut is unavailable or already in use".to_owned())
+            .map_err(|error| format!("Shortcut registration failed: {error}"))
     }
 
     fn unregister_expression(&self, expression: &str) -> Result<(), String> {
@@ -160,7 +162,7 @@ impl TauriShortcutRegistrar {
 
     fn outcome_views(
         bindings: &[ShortcutBinding],
-        failed: &HashSet<ShortcutBindingId>,
+        failed: &HashMap<ShortcutBindingId, String>,
     ) -> Vec<ShortcutBindingView> {
         bindings
             .iter()
@@ -168,9 +170,12 @@ impl TauriShortcutRegistrar {
                 binding: binding.clone(),
                 registration: match &binding.chord {
                     None => ShortcutRegistrationState::Unbound,
-                    Some(_chord) if failed.contains(&binding.id) => {
+                    Some(_chord) if failed.contains_key(&binding.id) => {
                         ShortcutRegistrationState::Failed {
-                            message: "This shortcut is unavailable or already in use".to_owned(),
+                            message: failed
+                                .get(&binding.id)
+                                .cloned()
+                                .unwrap_or_else(|| "Shortcut registration failed".to_owned()),
                         }
                     }
                     Some(chord) => ShortcutRegistrationState::Registered {
@@ -185,9 +190,9 @@ impl TauriShortcutRegistrar {
         &self,
         bindings: &[ShortcutBinding],
         active: &HashSet<String>,
-    ) -> (HashSet<String>, HashSet<ShortcutBindingId>) {
+    ) -> (HashSet<String>, HashMap<ShortcutBindingId, String>) {
         let mut added = HashSet::new();
-        let mut failed = HashSet::new();
+        let mut failed = HashMap::new();
         for binding in bindings {
             let Some(chord) = &binding.chord else {
                 continue;
@@ -196,10 +201,13 @@ impl TauriShortcutRegistrar {
             if active.contains(&expression) || added.contains(&expression) {
                 continue;
             }
-            if self.register_expression(&expression).is_ok() {
-                added.insert(expression);
-            } else {
-                failed.insert(binding.id);
+            match self.register_expression(&expression) {
+                Ok(()) => {
+                    added.insert(expression);
+                }
+                Err(message) => {
+                    failed.insert(binding.id, message);
+                }
             }
         }
         (added, failed)
@@ -220,17 +228,20 @@ impl ShortcutRegistrar for TauriShortcutRegistrar {
         bindings: &[ShortcutBinding],
     ) -> Result<Vec<ShortcutBindingView>, ShortcutRegistrarError> {
         let previous = self.active_lock().clone();
-        let (added, failed_ids) = self.register_candidates(bindings, &previous);
-        if !failed_ids.is_empty() {
+        let (added, failures_by_id) = self.register_candidates(bindings, &previous);
+        if !failures_by_id.is_empty() {
             for expression in &added {
                 let _ = self.unregister_expression(expression);
             }
             let failures = bindings
                 .iter()
-                .filter(|binding| failed_ids.contains(&binding.id))
+                .filter(|binding| failures_by_id.contains_key(&binding.id))
                 .map(|binding| BindingRegistrationFailure {
                     binding_id: binding.id,
-                    message: "This shortcut is unavailable or already in use".to_owned(),
+                    message: failures_by_id
+                        .get(&binding.id)
+                        .cloned()
+                        .unwrap_or_else(|| "Shortcut registration failed".to_owned()),
                 })
                 .collect();
             return Err(ShortcutRegistrarError::Rejected { failures });
@@ -256,7 +267,7 @@ impl ShortcutRegistrar for TauriShortcutRegistrar {
         }
         let mut current = self.active_lock();
         *current = desired;
-        Ok(Self::outcome_views(bindings, &HashSet::new()))
+        Ok(Self::outcome_views(bindings, &HashMap::new()))
     }
 
     async fn unregister_all(&self) -> Result<(), ShortcutRegistrarError> {

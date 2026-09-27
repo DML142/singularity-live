@@ -85,4 +85,22 @@ describe("Binds settings", () => {
     fireEvent.keyDown(recordButton, { code: "Escape" });
     expect(recordButton).toHaveTextContent("Not set");
   });
+
+  it("explains when the desktop session does not support global shortcuts", async () => {
+    updateShortcutBindingsMock.mockRejectedValue({ code: "registrarUnavailable" });
+    render(<SettingsPanel onBack={() => {}} />);
+
+    const row = await screen.findByTestId("shortcut-binding-row");
+    const recordButton = within(row).getByRole("button", { name: "Record shortcut" });
+    fireEvent.click(recordButton);
+    fireEvent.keyDown(recordButton, { code: "KeyQ", ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Save bindings" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Global shortcut registration is unavailable in this desktop session",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Try an X11 session or a Wayland desktop with GlobalShortcuts support",
+    );
+  });
 });

@@ -27,7 +27,12 @@ export interface DevAssistOutput {
 export interface DevAssistOptions {
   readonly argv: readonly string[];
   readonly env: Record<string, string | undefined>;
+  readonly platform?: string;
   readonly promptChoice: (
+    prompt: string,
+    choices: readonly DevAssistChoice[],
+  ) => Promise<string>;
+  readonly promptMenu?: (
     prompt: string,
     choices: readonly DevAssistChoice[],
   ) => Promise<string>;

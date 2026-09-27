@@ -1,9 +1,27 @@
 import { spawn as spawnProcess } from "node:child_process";
+import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
-const DEFAULT_MODEL = "openrouter/free";
+const DEFAULT_MODEL = "google/gemma-4-31b-it:free";
+const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 const DEFAULT_TIMEOUT_SECONDS = "60";
+const MODEL_PROFILES = [
+  {
+    value: "gemini-3.8-flash",
+    label: "Google AI Studio — Gemini 3.8 Flash (text and screenshots)",
+    provider: "gemini",
+    model: DEFAULT_GEMINI_MODEL,
+  },
+  {
+    value: "openrouter/free",
+    label: "OpenRouter — free model router",
+    provider: "openrouter",
+    model: "openrouter/free",
+  },
+];
 const TASKS = [
   { value: "text", label: "Manual text assistance" },
   { value: "screenshot", label: "Screenshot assistance" },
@@ -13,16 +31,19 @@ export async function launchDevAssist({
   argv,
   env,
   promptChoice,
+  promptMenu,
   promptText,
   promptSecret,
   spawn,
   writeError,
+  platform = process.platform,
 }) {
   try {
     const values =
       argv.length === 0
-        ? await collectInteractiveValues(env, {
+        ? await collectInteractiveValues(env, platform, {
             promptChoice,
+            promptMenu,
             promptText,
             promptSecret,
           })
@@ -30,15 +51,23 @@ export async function launchDevAssist({
     validateValues(values);
     const childEnvironment = {
       ...env,
-      OPENROUTER_API_KEY: values.apiKey,
-      SINGULARITY_LIVE_PROVIDER: "openrouter",
+      [values.provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY"]:
+        values.apiKey,
+      SINGULARITY_LIVE_PROVIDER: values.provider,
       SINGULARITY_LIVE_MODEL: values.model,
       SINGULARITY_LIVE_CONTEXT_PACK: values.contextPack,
       SINGULARITY_LIVE_REQUEST_TIMEOUT_SECONDS: values.timeoutSeconds,
       SINGULARITY_LIVE_DEV_ASSIST_TASK: values.task,
       VITE_SINGULARITY_LIVE_DEV_ASSIST_TASK: values.task,
     };
-    return await spawn("pnpm", ["tauri", "dev"], {
+    const invocation =
+      platform === "win32"
+        ? {
+            command: env.ComSpec || env.COMSPEC || "cmd.exe",
+            args: ["/d", "/s", "/c", "pnpm tauri dev"],
+          }
+        : { command: "pnpm", args: ["tauri", "dev"] };
+    return await spawn(invocation.command, invocation.args, {
       env: childEnvironment,
       stdio: "inherit",
     });
@@ -93,19 +122,56 @@ export async function readHiddenInput(input, output, prompt) {
   });
 }
 
-async function collectInteractiveValues(env, prompts) {
+async function collectInteractiveValues(env, platform, prompts) {
   const task = await prompts.promptChoice("Choose an assistance workflow:", TASKS);
-  const model =
-    env.SINGULARITY_LIVE_MODEL ||
-    (await prompts.promptText("OpenRouter model slug", DEFAULT_MODEL));
-  const contextPack =
-    env.SINGULARITY_LIVE_CONTEXT_PACK ||
-    (await prompts.promptText("Installed context pack ID", ""));
+  const configuredProvider = env.SINGULARITY_LIVE_PROVIDER;
+  let provider = configuredProvider;
+  let model = env.SINGULARITY_LIVE_MODEL;
+  if (!model && prompts.promptMenu) {
+    const profiles = MODEL_PROFILES.filter(
+      (profile) => !configuredProvider || profile.provider === configuredProvider,
+    );
+    if (profiles.length === 0) {
+      throw new Error("No numbered model choices are available for this provider");
+    }
+    const selectedProfile = await prompts.promptMenu(
+      "Choose a provider and model:",
+      profiles.map(({ value, label }) => ({ value, label })),
+    );
+    const profile = profiles.find((candidate) => candidate.value === selectedProfile);
+    if (!profile) {
+      throw new Error("Choose one of the listed provider and model options");
+    }
+    provider = profile.provider;
+    model = profile.model;
+  } else if (!model) {
+    model = await prompts.promptText(
+      "Model ID (OpenRouter slug or Gemini model ID)",
+      configuredProvider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_MODEL,
+    );
+  }
+  provider ||= inferProvider(model);
+
+  let contextPack = env.SINGULARITY_LIVE_CONTEXT_PACK;
+  if (!contextPack && prompts.promptMenu) {
+    const packs = await installedContextPackChoices(env, platform);
+    if (packs.length === 0) {
+      throw new Error(
+        "No installed context packs found in the application data directory",
+      );
+    }
+    contextPack = await prompts.promptMenu("Choose an installed context pack:", packs);
+  } else if (!contextPack) {
+    contextPack = await prompts.promptText("Installed context pack ID", "");
+  }
+  const keyName = provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY";
+  const providerLabel = provider === "gemini" ? "Google AI Studio" : "OpenRouter";
   const apiKey =
-    env.OPENROUTER_API_KEY ||
-    (await prompts.promptSecret("OpenRouter API key (input hidden): "));
+    env[keyName] ||
+    (await prompts.promptSecret(`${providerLabel} API key (input hidden): `));
   return {
     task,
+    provider,
     model,
     contextPack,
     apiKey,
@@ -114,13 +180,75 @@ async function collectInteractiveValues(env, prompts) {
   };
 }
 
+async function installedContextPackChoices(env, platform) {
+  const applicationDataDirectory = applicationDataPath(env, platform);
+  let directories;
+  try {
+    directories = await readdir(join(applicationDataDirectory, "context-packs"), {
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return [];
+    }
+    throw new Error("Installed context packs could not be listed");
+  }
+
+  const packs = [];
+  for (const directory of directories) {
+    if (!directory.isDirectory() || !/^[A-Za-z0-9_-]{1,64}$/.test(directory.name)) {
+      continue;
+    }
+    try {
+      const files = await readdir(
+        join(applicationDataDirectory, "context-packs", directory.name),
+        { withFileTypes: true },
+      );
+      if (files.some((file) => file.name === "manifest.yaml" && file.isFile())) {
+        packs.push({ value: directory.name, label: directory.name });
+      }
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw new Error("Installed context packs could not be listed");
+      }
+    }
+  }
+  return packs.sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function applicationDataPath(env, platform) {
+  const homeDirectory = homedir();
+  if (platform === "win32") {
+    return join(
+      env.APPDATA || join(homeDirectory, "AppData", "Roaming"),
+      "local.singularity.live",
+    );
+  }
+  if (platform === "darwin") {
+    return join(
+      homeDirectory,
+      "Library",
+      "Application Support",
+      "local.singularity.live",
+    );
+  }
+  return join(
+    env.XDG_DATA_HOME || join(homeDirectory, ".local", "share"),
+    "local.singularity.live",
+  );
+}
+
+function isMissingPathError(error) {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
 function parseArgumentValues(argv, env) {
   const options = new Map();
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index];
     if (option === "--help") {
       throw new Error(
-        "Usage: pnpm assist --task <text|screenshot> [--model <slug>] [--context-pack <id>]",
+        "Usage: pnpm assist --task <text|screenshot> [--model <model-id>] [--context-pack <id>]",
       );
     }
     if (
@@ -147,15 +275,20 @@ function parseArgumentValues(argv, env) {
   if (!task) {
     throw new Error("Argument mode requires --task text or --task screenshot");
   }
-  const apiKey = env.OPENROUTER_API_KEY;
+  const model =
+    options.get("--model") ||
+    env.SINGULARITY_LIVE_MODEL ||
+    (env.SINGULARITY_LIVE_PROVIDER === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_MODEL);
+  const provider = env.SINGULARITY_LIVE_PROVIDER || inferProvider(model);
+  const keyName = provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY";
+  const apiKey = env[keyName];
   if (!apiKey || apiKey.trim().length === 0) {
-    throw new Error(
-      "Set OPENROUTER_API_KEY in the environment before using argument mode",
-    );
+    throw new Error(`Set ${keyName} in the environment before using argument mode`);
   }
   return {
     task,
-    model: options.get("--model") || env.SINGULARITY_LIVE_MODEL || DEFAULT_MODEL,
+    provider,
+    model,
     contextPack:
       options.get("--context-pack") || env.SINGULARITY_LIVE_CONTEXT_PACK || "",
     apiKey,
@@ -170,11 +303,14 @@ function validateValues(values) {
   if (!TASKS.some((task) => task.value === values.task)) {
     throw new Error("Choose a supported assistance workflow");
   }
+  if (values.provider !== "openrouter" && values.provider !== "gemini") {
+    throw new Error("Choose openrouter or gemini as the configured provider");
+  }
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(values.model) ||
     looksLikeCredential(values.model)
   ) {
-    throw new Error("The OpenRouter model slug is invalid");
+    throw new Error("The provider model ID is invalid");
   }
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(values.contextPack)) {
     throw new Error("Set the ID of an installed context pack");
@@ -183,13 +319,21 @@ function validateValues(values) {
     throw new Error("Request timeout must be an integer from 5 to 300 seconds");
   }
   if (typeof values.apiKey !== "string" || values.apiKey.trim().length === 0) {
-    throw new Error("Set OPENROUTER_API_KEY before launching the app");
+    throw new Error(
+      `Set ${values.provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY"} before launching the app`,
+    );
   }
+}
+
+function inferProvider(model) {
+  return /^gemini(?:[-/]|$)/i.test(model) ? "gemini" : "openrouter";
 }
 
 function looksLikeCredential(value) {
   return (
-    /^(?:sk-|or-)[A-Za-z0-9_-]{12,}$/i.test(value) || /^[A-Za-z0-9_-]{48,}$/.test(value)
+    /^(?:sk-|or-)[A-Za-z0-9_-]{12,}$/i.test(value) ||
+    /^AIza[A-Za-z0-9_-]{35}$/.test(value) ||
+    /^[A-Za-z0-9_-]{48,}$/.test(value)
   );
 }
 
@@ -242,6 +386,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     argv: process.argv.slice(2),
     env: process.env,
     promptChoice,
+    promptMenu: promptChoice,
     promptText,
     promptSecret,
     spawn: spawnDevProcess,

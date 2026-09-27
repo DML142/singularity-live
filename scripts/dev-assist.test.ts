@@ -27,6 +27,7 @@ describe("development assist launcher", () => {
     const result = await launchDevAssist({
       argv: [],
       env: {},
+      platform: "linux",
       promptChoice,
       promptText,
       promptSecret,
@@ -51,6 +52,29 @@ describe("development assist launcher", () => {
     expect(writeError).not.toHaveBeenCalledWith(
       expect.stringContaining("test-openrouter-secret"),
     );
+  });
+
+  it("starts the Tauri development command through the Windows command processor", async () => {
+    const result = await launchDevAssist({
+      argv: [],
+      env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+      platform: "win32",
+      promptChoice,
+      promptText,
+      promptSecret,
+      spawn,
+      writeError,
+    });
+
+    expect(result).toBe(0);
+    const spawnedCall = spawn.mock.calls.at(0);
+    expect(spawnedCall).toBeDefined();
+    if (spawnedCall === undefined) {
+      throw new Error("The dev process was not started");
+    }
+    const [command, args] = spawnedCall;
+    expect(command).toBe("C:\\Windows\\System32\\cmd.exe");
+    expect(args).toEqual(["/d", "/s", "/c", "pnpm tauri dev"]);
   });
 
   it("skips prompts in argument mode and refuses a missing environment key", async () => {

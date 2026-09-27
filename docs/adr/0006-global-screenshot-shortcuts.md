@@ -35,5 +35,7 @@ Linux Wayland does not expose the X11 global-shortcut backend used by the Tauri 
 The feature reuses the existing screenshot lifecycle and provider boundary without adding
 image persistence or a second capture path. Native hotkeys work only while the application
 process is running. Wayland may require user-visible portal consent and can choose an
-effective trigger different from the requested one. Cross-platform desktop smoke checks are
-required before this roadmap item is marked complete.
+effective trigger different from the requested one. Wayland sessions without a
+GlobalShortcuts portal cannot register binds; users need a supported portal backend or an
+X11 session. Cross-platform desktop smoke checks are required before this roadmap item is
+marked complete.

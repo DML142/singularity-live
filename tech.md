@@ -6,14 +6,20 @@ boundaries. A capability is not implemented unless the current-status sections s
 
 ## 1. Product overview
 
-Singularity Live is a real-time desktop context copilot. Its intended product loop is
-“hear + see + remember + reason”: combine live speech, manual input, screenshots,
-persistent user context, and recent session context to produce low-latency assistance.
+Singularity Live is a backstage creative assistant for people making live or recorded
+content: programming streams, coding tutorials, gameplay videos, and dynamic video scripts.
+It helps a creator reason about code and images, develop an idea while recording, and respond
+to speech from the creator or a co-host. The creator sees the assistant; the audience should
+not see its window in the creator's broadcast or recording.
 
-The application is appropriate for consent-based interviews and assessments, pair
-programming, technical calls, study, code explanation, debugging, and contextual desktop
-assistance. It will not hide from screen sharing, evade capture, interfere with monitoring,
-or covertly manipulate another application's capture pipeline.
+The core interaction accepts typed text, an explicitly selected screenshot, and (when the
+planned voice-input workflow is implemented) explicitly captured microphone or system audio
+converted to text. The assistant returns text only. Voice input is a way to provide context,
+not a request for spoken AI replies.
+
+Keeping the assistant window out of supported screen-capture output while leaving it visible
+and usable to the creator is a required product capability and release gate. It is distinct
+from briefly hiding the window while this application captures its own screenshot.
 
 ### Terminology
 
@@ -26,12 +32,17 @@ or covertly manipulate another application's capture pipeline.
 - **Model**: a configurable provider-specific model identifier.
 - **Capture**: an explicit audio or image acquisition operation.
 - **Attachment**: metadata describing a saved or temporary session artifact.
-- **Response mode**: presentation intent such as Quick, Answer, Explain, or Code.
+- **Response mode**: creator intent such as Quick, Explain, Code, or Script.
 
 ## 2. Goals
 
-- Produce useful contextual assistance with low perceived latency.
-- Combine speech, screenshots, user context, and recent session state safely.
+- Help creators produce accurate code, explanations, and video ideas with low perceived
+  latency and clear uncertainty when the model lacks enough information.
+- Combine creator-selected speech, screenshots, typed input, user context, and recent session
+  state safely.
+- Convert incoming speech to editable text and return assistant replies as text only.
+- Keep the assistant window out of supported broadcast and recording captures without
+  hiding it from the creator.
 - Keep providers replaceable and model identifiers configurable.
 - Treat privacy, explicit capture state, and transient media handling as product behavior.
 - Remain maintainable and cross-platform, with Windows as the primary production target.
@@ -40,38 +51,43 @@ or covertly manipulate another application's capture pipeline.
 
 ## 3. Non-goals
 
-- Stealth, screen-share evasion, capture bypass, or interference with monitoring software.
 - A cloud account platform, multi-user backend, plugin marketplace, or distributed system.
 - Permanent recording of raw audio or screenshots by default.
+- Spoken AI replies or audio generation.
+- Interview, exam, or assessment assistance; the product is for creator workflows.
+- Claiming zero hallucinations or treating generated code as verified without review.
 - Direct model-provider networking or secret storage in React.
 - Implementing roadmap features before their phase begins.
 
 ## 4. MVP definition
 
-The eventual MVP has two composable pipelines:
+The creator MVP has two input pipelines and one required desktop-output property:
 
 ```mermaid
 flowchart LR
-  Speech[System or microphone audio] --> VAD[Local voice activity detection]
+  Speech[Explicit mic or system-audio capture] --> VAD[Local voice activity detection]
   VAD --> STT[Speech-to-text provider]
-  STT --> Session[Session orchestrator]
-  Text[Manual text] --> Session
+  STT --> Composer[Editable transcript in composer]
+  Text[Typed text] --> Composer
+  Composer -->|explicit send| Session[Session orchestrator]
   Session --> Select[Context selector]
   Select --> Router[Provider router]
-  Router --> Stream[Streamed suggestion]
+  Router --> Stream[Streamed text response]
 ```
 
 ```mermaid
 flowchart LR
-  Trigger[Explicit capture action] --> Capture[Screen or region capture]
+  Trigger[Explicit screenshot action] --> Capture[Screen or region capture]
   Capture --> Prepare[Image preprocessing]
   Prepare --> Request[Multimodal request]
   Context[Persistent and current context] --> Request
-  Request --> Result[Contextual result]
+  Request --> Result[Text response]
 ```
 
-Speech, typed input, screenshots, persistent context, and recent turns must ultimately be
-combinable in one request. None of these pipelines is implemented in Phase 0.
+The assistant window must also be excluded from supported broadcast/recording captures while
+remaining visible on the creator's desktop. Voice transcripts are reviewed or edited in the
+composer and sent only after the creator acts. Audio never produces spoken assistant output.
+Audio input and broadcast capture protection are not implemented in Phase 0.
 
 ## 5. Architecture
 
@@ -172,10 +188,17 @@ audio, screenshots, full context packs, and full provider payloads must not be l
 
 ## 9. Provider architecture
 
-Planned capability ports include speech-to-text and broader multimodal generation. Text
-generation currently has one direct OpenRouter adapter; it supports provider-neutral still
-image parts for the explicit screenshot request path. OpenRouter is an infrastructure
-choice, not a domain dependency.
+Planned capability ports include speech-to-text. Text generation has direct OpenRouter and
+Gemini adapters; both support provider-neutral still image parts for explicit screenshot
+requests. Provider choice is an infrastructure setting, not a domain dependency.
+
+The selected initial models are `gemini-3.5-transcribe-live` for planned transcript-only
+live speech recognition and `gemini-3.8-flash` for text, image, code, and explanation
+requests. Gemini text and image generation is implemented through a direct Rust adapter;
+live requests with the user's key have not yet been verified in this change. Speech
+recognition remains planned, not implemented. Evaluate Russian/Ukrainian technical
+transcripts, screenshot interpretation, code correctness, latency, and cost before calling
+either path production-ready. OpenRouter remains available as an alternative text provider.
 
 ```mermaid
 flowchart LR
@@ -185,7 +208,7 @@ flowchart LR
   Adapter --> Vendor[External provider]
 ```
 
-The current router selects OpenRouter from typed startup configuration and enforces the
+The router selects OpenRouter or Gemini from typed startup configuration and enforces the
 configured model and provider-stream timeout. It supports cancellation and classifies
 authentication, configuration, invalid-request, rate-limit, timeout, transport, provider,
 cancellation, and malformed-response failures. It does not retry or fall back. Provider DTOs, endpoints,
@@ -259,10 +282,19 @@ session remains volatile and in memory.
 
 ## 13. Audio plan
 
-The planned cross-platform flow is `AudioSource → normalizer → local VAD → segment buffer
-→ STT provider → transcript event`. `MicrophoneSource` and `SystemAudioSource` are
-platform-independent concepts. Windows system audio will use a platform adapter, likely
-WASAPI loopback, without leaking Windows types into the domain.
+The planned flow is `AudioSource → normalizer → local VAD → segment buffer → STT provider
+→ editable transcript`. `MicrophoneSource` and `SystemAudioSource` are platform-independent
+concepts. Windows system audio will use a platform adapter, likely WASAPI loopback, without
+leaking Windows types into the domain. Creators can choose their microphone for their own
+commentary or system audio for a co-host or game conversation.
+
+The initial STT choice is Gemini 3.5 Transcribe Live, configured for text-only transcripts,
+Russian/Ukrainian language detection, and a configurable technical-term vocabulary. The
+visible voice-input shortcut starts and stops capture; the finalized transcript is inserted
+into the composer for review and editing. Sending it to the text-generation path remains a
+separate explicit action and can include a selected screenshot.
+Live transcription sessions are limited to ten minutes and must reconnect during longer
+sessions. See the [Live Transcribe guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe).
 
 VAD is local and selected later using latency, CPU, packaging, portability, and accuracy
 evidence. Raw audio is transient by default: capture, segment, transcribe, discard. Audio
@@ -291,6 +323,8 @@ extraction, or cost reduction.
 - Rust domain and application behavior uses unit and integration tests.
 - The OpenRouter adapter uses a local mock HTTP server for request mapping, SSE parsing,
   still-image serialization, provider error classification, timeout, and cancellation.
+  Gemini uses the same Rust port and maps images to Gemini inline data; live Gemini requests
+  have not yet been verified with an API key.
   Capture tests use fake backends; session tests use a fake router for follow-up context,
   screenshot composition, bounds and summaries, relevance filtering, reset, cancellation,
   and recovery after failures. Automated tests need no API key and make no provider calls.
@@ -321,9 +355,15 @@ signed distribution.
 
 ## 17. Platform strategy
 
-Windows is the primary production target. Linux and macOS are secondary supported targets.
-Shared domain and application layers remain platform-independent; capture, audio, shortcuts,
-credential storage, and permissions live behind target-specific adapters.
+Windows is the primary production target and the first target for broadcast capture
+protection. Linux and macOS are secondary desktop targets. Shared domain and application
+layers remain platform-independent; capture, audio, shortcuts, credential storage,
+permissions, and capture protection live behind target-specific adapters.
+
+Tauri content protection is enabled for the Windows main window. The Linux windowing backend
+does not support this feature. A macOS implementation requires a separate platform decision
+and validation; do not describe a build as broadcast-protected unless its capture behavior
+has passed the release checks.
 
 Unsupported functions should be surfaced through future capability reporting rather than
 random runtime failure. Paths always use Tauri/platform APIs. Packaging, signing, installers,
@@ -337,6 +377,8 @@ updates, and full cross-platform validation are Phase 7 work.
 - Provider latency, availability, and pricing require routing metrics without payload logging.
 - Context selection needs evaluation to avoid irrelevant or privacy-heavy prompts.
 - Screenshot permission and window/region capabilities differ by display server and OS.
+- Broadcast software uses different capture APIs; operating-system window protection must be
+  verified with the actual supported recording and streaming paths.
 - IPC type drift may justify generated bindings once the command surface becomes substantial.
 - The provisional application identifier must change before distribution.
 
@@ -394,8 +436,7 @@ verified a real desktop OpenRouter request with text context on 2026-09-26.
 **Scope:** Monitor/region capture, supported window capture, preprocessing, multimodal path,
 preview, and transient-lifecycle behavior.
 
-**Out of scope:** Audio, OCR without benchmark justification, implicit persistence, and
-stealth behavior.
+**Out of scope:** Audio, OCR without benchmark justification, and implicit persistence.
 
 **Deliverables:** Rust capture adapters, capability reporting, multimodal requests, preview
 UI, permission/error states, and privacy tests.
@@ -423,40 +464,68 @@ always-on-top hide/capture/restore coordination; and an optional development lau
 tray or launch-at-login behavior, and actions other than Screenshot.
 
 **Acceptance criteria:** Global capture works while the app is active or minimized; the app is
-excluded from the image and returns above other windows; binding edits validate and roll back
-safely; preview remains temporary and is sent only by explicit user action; the dev launcher
-does not echo or persist credentials; automated tests pass; and manual desktop smoke checks
-pass on supported operating systems.
+hidden from this app's own screenshot and returns above other windows; binding edits validate
+and roll back safely; preview remains temporary and is sent only by explicit user action; the
+dev launcher does not echo or persist credentials; automated tests pass; and manual desktop
+smoke checks pass on supported operating systems.
 
 **Status:** In progress — implementation and automated validation are complete. Manual desktop
 smoke checks for active/minimized activation, always-on-top restore, capture without
 self-inclusion, and platform permission flows have not yet been recorded. Phase 3 remains
 `Not started`; Phase 4 remains `In progress`.
 
+### Phase 2.6 — Broadcast capture protection
+
+**Goal:** Keep the assistant usable on the creator's desktop while excluding its window
+contents from supported screen recordings and broadcasts.
+
+**Scope:** Enable Tauri `contentProtected` on the Windows main window; document platform
+support and verify the output with supported screen-capture sources. This protects the
+assistant window in external capture. Phase 2.5's hide/capture/restore sequence remains the
+separate mechanism for this app's own screenshot workflow.
+
+**Out of scope:** Hiding the application from the creator, camera-based recording, DRM or
+security guarantees, and claiming support for capture backends that have not been verified.
+
+**Acceptance criteria:** The Windows main window requests content protection at startup; the
+creator can still use the visible window; supported OBS display and window capture omit the
+assistant contents on Windows 10 version 2004 or later; documentation names unsupported or
+unverified platforms; no roadmap phase or release may claim broadcast protection before these
+checks pass.
+
+**Status:** Implemented in the Windows Tauri configuration; manual OBS smoke checks have not
+yet been recorded.
+
 ### Phase 3 — Audio and transcription
 
-**Goal:** Convert explicit microphone and supported system audio into low-latency transcript
-events.
+**Goal:** Give creators low-latency voice input from their microphone or supported system
+audio, including a co-host's speech, and turn it into editable text for the assistant.
 
-**Scope:** Audio abstractions, Windows loopback capture, local VAD, segmentation, Groq STT,
-transcript rendering, and latency metrics.
+**Scope:** Explicit start/stop voice-input shortcut, audio-source selection, Windows loopback
+and microphone capture, local VAD, segmentation, Gemini 3.5 Transcribe Live, transcript review
+and composer integration, and latency metrics. The creator sends the transcript as text after
+review; generated responses stay text-only.
 
 **Out of scope:** Permanent recording, cloud silence detection, and advanced session routing.
 
 **Deliverables:** Platform adapters, VAD ADR/implementation, STT adapter, transcript events,
 UI, privacy-safe metrics, and tests.
 
-**Acceptance criteria:** Capture is visibly active and user-started; silence stays local;
-raw segments are discarded; transcript events render; measured latency is documented.
+**Acceptance criteria:** Capture is visibly active and user-started; the selected speaker is
+transcribed into editable text; the creator decides when to send it; silence stays local; raw
+segments are discarded; no spoken assistant response is generated; long sessions reconnect
+without losing transcript context; measured latency is documented.
 
 **Status:** Not started
 
 ### Phase 4 — Session intelligence
 
-**Goal:** Combine session memory, context relevance, modalities, and response modes.
+**Goal:** Combine creator-session memory, context relevance, modalities, and code, explanation,
+and dynamic-script response modes.
 
 **Scope:** Complete lifecycle, recent turns, rolling summaries, intent/context routing,
-combined screenshot + transcript requests, modes, interruption, and cancellation.
+combined screenshot + transcript requests through Gemini 3.8 Flash, modes, interruption, and
+cancellation.
 
 **Out of scope:** Long-term history UI and release packaging.
 
@@ -514,13 +583,14 @@ are OS-backed; sensitive payloads never log; offline startup is safe; recovery i
 production icons, installers, release automation, update/signing strategy, and platform
 validation.
 
-**Out of scope:** Stealth overlays, monitoring bypass, and unrelated cloud services.
+**Out of scope:** Unrelated cloud services.
 
 **Deliverables:** Release UX, signed installers where configured, measured performance,
 cross-platform reports, and release documentation.
 
 **Acceptance criteria:** Supported installers launch and update safely; accessibility checks
-pass; shortcuts and compact mode are ordinary visible UX; measurements are reproducible.
+pass; broadcast capture protection passes its supported-platform checks before release;
+shortcuts and compact mode are ordinary visible UX; measurements are reproducible.
 
 **Status:** Not started
 
@@ -543,26 +613,29 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
   selection, validated region crop, in-memory preview, separate send/discard actions, and
   cleanup on expiry, reset, unmount, errors, and cancellation.
 - Rust-only platform capture adapters, bounded image preparation, a five-minute transient
-  image store, request-scoped image parts through the provider-neutral router, and an
-  OpenRouter still-image mapping that preserves text-only request compatibility.
+  image store, request-scoped image parts through the provider-neutral router, and OpenRouter
+  and Gemini image mappings that preserve text-only request compatibility.
 - Versioned non-secret shortcut bindings, transactional native shortcut registration and
   Wayland portal integration, monitor-under-pointer capture coordination, an always-on-top
   window lifecycle, and the Settings → Binds view with transient hotkey previews.
-- A development-only interactive/argument launcher that passes credentials only to the
-  spawned process without echoing or persisting them.
+- Windows-specific Tauri `contentProtected` configuration for the main window. Its behavior
+  with real OBS display and window capture still needs manual smoke validation.
+- A development-only interactive/argument launcher with numbered workflow, model, and
+  installed context-pack choices that passes credentials only to the spawned process
+  without echoing or persisting them.
 - Typed clients for application status and manual-assistance IPC; unknown event payloads are
   validated at runtime and stale request IDs are ignored.
 - Rust application-status service and `SessionService` with one active request.
 - Versioned context-pack validation, safe Markdown loading, deterministic selection, and
   bounded prompt construction.
-- Typed OpenRouter configuration, Rust-only environment secret lookup, provider-independent
-  text-generation ports, router, streaming adapter, timeout, cancellation, and safe failure
-  classification.
+- Typed OpenRouter/Gemini configuration, Rust-only environment secret lookup for
+  `OPENROUTER_API_KEY` and `GEMINI_API_KEY`, provider-independent text-generation ports,
+  router, streaming adapters, timeout, cancellation, and safe failure classification.
 - Explicit permissions for the implemented application and screen-assistance commands and
   event listening and cleanup, no Tauri plugin permissions, and a production content security
   policy without `unsafe-inline`.
-- Fictional context-pack example, OpenRouter setup instructions, and a focused provider and
-  credential-boundary ADR.
+- Fictional context-pack example, OpenRouter and Gemini setup instructions, and focused
+  provider and credential-boundary ADRs.
 - Frontend behavior test, formatting, lint, type checking, build scripts, and CI.
 - Rust formatting, Clippy, test, and check scripts.
 - Public README, this engineering guide, and focused ADRs.
@@ -571,8 +644,8 @@ pass; shortcuts and compact mode are ordinary visible UX; measurements are repro
 ### Architecturally planned, not implemented
 
 Additional provider adapters, OS-backed credential storage, multiple chats, persisted
-session history, audio, VAD, transcription, OCR, SQLite, history management, tray, compact
-mode, updater, signing, and production packaging.
+session history, audio capture, VAD, transcription, voice-input controls, OCR, SQLite,
+history management, tray, compact mode, updater, signing, and production packaging.
 
 ### Phase 0 validation record
 
@@ -600,6 +673,11 @@ acceptance criterion.
 | Tauri development startup                                                             | Built and started the native binary with provider configuration explicitly unset        |
 | Live OpenRouter request                                                               | User manually verified real desktop text-context assistance on 2026-09-26               |
 
+Direct Gemini text and screenshot generation was added on 2026-09-27. Formatting, lint,
+TypeScript checks, frontend build, and Rust compilation passed. Rust Clippy reported only
+the existing platform-shortcut dead-code warnings. The new Gemini adapter has not yet been
+verified with a live API key; automated tests were not run for this change.
+
 ### Session intelligence validation record
 
 This stage adds one volatile manual-text session. It does not complete Phase 4: broader
@@ -617,13 +695,13 @@ Automated checks use mock shortcut registrars, capture backends, portal sessions
 provider fixtures. They do not capture the desktop or make live provider requests. The
 manual desktop smoke criteria remain outstanding.
 
-| Check                                          | Result                                                                                                               |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Frontend format, lint, typecheck, tests, build | Passed on 2026-09-27: 42 tests across 10 files                                                                       |
-| Rust format, Clippy, tests, and check          | Passed on 2026-09-27: 119 tests and `cargo check`                                                                    |
-| Tauri development startup                      | Started on Linux Wayland with provider configuration and `OPENROUTER_API_KEY` unset                                  |
-| Desktop smoke on supported operating systems   | Not run: active/minimized shortcut, always-on-top, self-exclusion, and permission flow                               |
-| Full project `pnpm check`                      | Passed on 2026-09-25: 17 frontend tests, 66 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check |
+| Check                                          | Result                                                                                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frontend format, lint, typecheck, tests, build | Passed on 2026-09-27: 44 tests across 10 files                                                                                                   |
+| Rust format, Clippy, tests, and check          | Passed on 2026-09-27: 119 tests and `cargo check`                                                                                                |
+| Tauri development startup                      | Started on Linux Wayland with provider configuration and `OPENROUTER_API_KEY` unset                                                              |
+| Desktop smoke on supported operating systems   | Attempted on Ubuntu 24.04.4 / GNOME 46 Wayland: GlobalShortcuts portal interface is absent, so binds cannot register; Xorg smoke remains pending |
+| Full project `pnpm check`                      | Passed on 2026-09-27: 44 frontend tests, 119 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check                            |
 
 ### Screen assistance validation record
 
@@ -663,6 +741,8 @@ current stable compatible direct versions:
 - [ADR 0004: Ephemeral session context and Rust-owned lifecycle](docs/adr/0004-ephemeral-session-context.md)
 - [ADR 0005: Ephemeral screen assistance and provider-neutral image requests](docs/adr/0005-ephemeral-screen-assistance.md)
 - [ADR 0006: Global screenshot shortcuts and Rust-owned capture lifecycle](docs/adr/0006-global-screenshot-shortcuts.md)
+- [ADR 0007: Direct Gemini generation for text and screenshots](docs/adr/0007-gemini-generation.md)
+- [ADR 0008: Windows broadcast capture protection](docs/adr/0008-windows-broadcast-capture-protection.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform

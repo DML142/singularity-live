@@ -85,10 +85,8 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
       const saved = await updateShortcutBindings(drafts);
       setViews(saved);
       setDrafts(saved.map((view) => view.binding));
-    } catch {
-      setError(
-        "One or more shortcuts could not be registered. The saved bindings are unchanged.",
-      );
+    } catch (saveError) {
+      setError(shortcutSaveErrorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -264,4 +262,77 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
       )}
     </section>
   );
+}
+
+function shortcutSaveErrorMessage(error: unknown): string {
+  const commandError = parseShortcutCommandError(error);
+  if (commandError !== null && commandError.code === "registrarUnavailable") {
+    return "Global shortcut registration is unavailable in this desktop session. Try an X11 session or a Wayland desktop with GlobalShortcuts support. The saved bindings are unchanged.";
+  }
+  if (commandError !== null && commandError.code === "registrationRejected") {
+    const failures = commandError.failures;
+    if (isUnknownArray(failures)) {
+      const messages = failures.flatMap((failure) => {
+        if (
+          isRecord(failure) &&
+          typeof failure.message === "string" &&
+          failure.message.trim().length > 0
+        ) {
+          return [failure.message];
+        }
+        return [];
+      });
+      if (messages.length > 0) {
+        return `${messages.join("; ")} The saved bindings are unchanged.`;
+      }
+    }
+    if (
+      typeof commandError.message === "string" &&
+      commandError.message.trim().length > 0
+    ) {
+      return `${commandError.message} The saved bindings are unchanged.`;
+    }
+  }
+  if (
+    commandError !== null &&
+    typeof commandError.message === "string" &&
+    commandError.message.trim().length > 0
+  ) {
+    return `${commandError.message} The saved bindings are unchanged.`;
+  }
+  const rawMessage =
+    typeof error === "string"
+      ? error
+      : isRecord(error) && typeof error.message === "string"
+        ? error.message
+        : null;
+  if (rawMessage !== null && rawMessage.trim().length > 0) {
+    return `${rawMessage} The saved bindings are unchanged.`;
+  }
+  return "One or more shortcuts could not be registered. The saved bindings are unchanged.";
+}
+
+function parseShortcutCommandError(error: unknown): Record<string, unknown> | null {
+  if (isRecord(error) && "code" in error) {
+    return error;
+  }
+  const message =
+    isRecord(error) && typeof error.message === "string" ? error.message : error;
+  if (typeof message !== "string") {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(message);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return message.trim().length > 0 ? { message } : null;
+  }
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

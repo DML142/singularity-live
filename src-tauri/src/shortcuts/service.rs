@@ -11,7 +11,11 @@ use super::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
 pub enum ShortcutRegistrationState {
     Registered { effective_trigger: String },
     Unbound,

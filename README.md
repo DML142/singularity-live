@@ -1,15 +1,17 @@
 # Singularity Live
 
-Singularity Live is a desktop context copilot for manual text and temporary screenshot
-assistance through OpenRouter, with context packs loaded by Rust from the application data
-directory. Global screenshot shortcuts can be configured in Settings → Binds. Audio, live
-conversation, session history, and persistent credential storage remain future work; the
-implementation record is in [tech.md](tech.md).
+Singularity Live is a backstage assistant for creators making live coding streams, recorded
+programming or gameplay videos, and dynamic scripts. It currently accepts typed requests and
+temporary screenshots, then returns streamed text through OpenRouter or Gemini. Voice input
+will be transcribed to editable text; spoken assistant replies are out of scope. On Windows,
+Tauri is configured to exclude the assistant window from supported screen captures while it
+remains visible locally; OBS verification is still pending. The product direction and roadmap
+are recorded in [tech.md](tech.md).
 
 ## Current status
 
 The desktop foundation, manual context/provider path, and transient screenshot assistance
-are implemented. Provider calls in automated checks use mocks; live OpenRouter requests are
+are implemented. Provider calls in automated checks use mocks; live provider requests are
 not sent by the test suite. Roadmap status and validation evidence are recorded in
 [tech.md](tech.md).
 
@@ -19,9 +21,10 @@ The shell currently provides:
 - backend readiness loaded through a typed Tauri IPC command;
 - temporary screen assistance from the assistant or a configurable global shortcut;
 - an always-on-top main window and a Rust-owned capture, permission, and image lifecycle;
+- Windows capture-protection configuration for the main window, pending manual OBS validation;
 - a Binds settings view for adding and recording screenshot shortcuts;
 - Rust-owned context loading, provider configuration, credentials, routing, and streaming;
-- safe setup guidance when OpenRouter or the configured context pack is unavailable;
+- safe setup guidance when the selected provider or context pack is unavailable;
 - exact Tauri permissions for status, readiness, start, and cancel commands.
 
 ## Technology
@@ -67,27 +70,48 @@ Run the desktop application with the real Rust IPC boundary:
 pnpm tauri dev
 ```
 
-For an interactive development launcher that offers the available assistance workflows and
-asks for a missing OpenRouter key without echoing or saving it:
+For an interactive development launcher with numbered choices for the assistance workflow,
+provider/model, and installed context packs. It asks for the selected provider's missing key
+with hidden input and does not save it:
 
 ```sh
 pnpm assist
 ```
 
-With arguments, the launcher skips prompts and requires the key in the environment. It never
-accepts the key as an argument:
+With arguments, the launcher skips prompts and requires the selected key in the environment.
+It never accepts the key as an argument:
 
 ```sh
 export OPENROUTER_API_KEY='…'
 pnpm assist -- --task screenshot --context-pack fictional-developer
 ```
 
-The direct `pnpm tauri dev` command remains available and unchanged.
+The direct `pnpm tauri dev` command remains available and unchanged. To choose a model not
+listed in the numbered menu, set `SINGULARITY_LIVE_PROVIDER` and `SINGULARITY_LIVE_MODEL`
+before running the launcher, or use its argument mode.
 
 ## Manual text assistance
 
-The first provider is OpenRouter. Set the following variables in the environment inherited
-by `pnpm tauri dev`:
+Choose OpenRouter or Gemini by setting `SINGULARITY_LIVE_PROVIDER`. For Gemini text and
+screenshot assistance, set the following variables in the environment inherited by
+`pnpm tauri dev`:
+
+```sh
+export SINGULARITY_LIVE_PROVIDER=gemini
+export SINGULARITY_LIVE_MODEL=gemini-3.8-flash
+export GEMINI_API_KEY='…'
+export SINGULARITY_LIVE_CONTEXT_PACK=fictional-developer
+export SINGULARITY_LIVE_REQUEST_TIMEOUT_SECONDS=60
+pnpm tauri dev
+```
+
+Create a key in [Google AI Studio](https://aistudio.google.com/api-keys). The app reads
+`GEMINI_API_KEY` only in Rust and sends it to Google's Gemini API as an authorization
+header. Do not put it in a `VITE_` variable, frontend `.env` file, source file, or Tauri
+command argument. The interactive `pnpm assist` launcher can ask for the key with hidden
+input; entering a model ID that starts with `gemini-` selects Gemini automatically.
+
+For OpenRouter, set the following variables instead:
 
 ```sh
 export SINGULARITY_LIVE_PROVIDER=openrouter
@@ -105,9 +129,11 @@ underlying model may vary between requests. Availability and behavior can change
 [OpenRouter's free router](https://openrouter.ai/openrouter/free) and
 [model catalog](https://openrouter.ai/models).
 
-The app accepts an OpenRouter model slug in `SINGULARITY_LIVE_MODEL`. It does not provide a
-model picker or automatically change models. An unset or unsupported provider/model
-configuration leaves the app open and shows safe setup guidance.
+The app accepts the selected provider's model identifier in `SINGULARITY_LIVE_MODEL`. It
+does not provide a model picker or automatically change models. An unset or unsupported
+provider/model configuration leaves the app open and shows safe setup guidance. Screenshot
+assistance sends the reviewed image with the request; Gemini audio transcription and voice
+input are not implemented yet.
 
 Context packs are read from Tauri's platform-specific application data directory at
 `context-packs/<SINGULARITY_LIVE_CONTEXT_PACK>/`. With this app's current identifier,

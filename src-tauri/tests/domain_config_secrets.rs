@@ -53,7 +53,7 @@ fn configuration_requires_every_named_setting() {
 }
 
 #[test]
-fn configuration_accepts_only_openrouter() {
+fn configuration_rejects_unsupported_providers() {
     let mut source = MapConfigSource::valid();
     let untrusted_value = "provider-value-that-must-not-cross-ipc";
     source
@@ -65,7 +65,7 @@ fn configuration_accepts_only_openrouter() {
     assert_eq!(error, ConfigError::UnsupportedProvider);
     assert_eq!(
         error.to_string(),
-        "Unsupported provider; expected openrouter"
+        "Unsupported provider; expected openrouter or gemini"
     );
     assert!(!error.to_string().contains(untrusted_value));
 }

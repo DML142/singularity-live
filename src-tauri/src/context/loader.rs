@@ -294,6 +294,36 @@ pub enum ContextError {
     },
 }
 
+impl ContextError {
+    #[must_use]
+    pub const fn safe_summary(&self) -> &'static str {
+        match self {
+            Self::MissingPackDirectory => "the context pack directory does not exist",
+            Self::PackDirectorySymlink => "the context pack directory cannot be a symbolic link",
+            Self::PackOutsideAllowedRoot => {
+                "the context pack is outside the allowed application data directory"
+            }
+            Self::MissingManifest => "manifest.yaml is missing",
+            Self::ManifestOutsidePack => "manifest.yaml resolves outside its pack",
+            Self::InvalidManifestFile => "manifest.yaml is not a regular file",
+            Self::ManifestTooLarge { .. } => "manifest.yaml exceeds the allowed size",
+            Self::MalformedManifest { .. } => "manifest.yaml is malformed",
+            Self::UnsupportedSchemaVersion { .. } => "the manifest schema version is unsupported",
+            Self::InvalidPackMetadata => "the pack metadata is invalid",
+            Self::TooManyDocuments { .. } => "the manifest contains too many documents",
+            Self::InvalidDocumentMetadata { .. } => "a document's metadata is invalid",
+            Self::DuplicateDocumentId { .. } => "the manifest contains duplicate document IDs",
+            Self::InvalidDocumentPath { .. } => "a document path is invalid",
+            Self::MissingDocument { .. } => "a referenced document is missing",
+            Self::DocumentOutsidePack { .. } => "a referenced document resolves outside the pack",
+            Self::DocumentTooLarge { .. } => "a document exceeds the allowed size",
+            Self::PackTooLarge { .. } => "the pack exceeds the allowed size",
+            Self::InvalidUtf8 { .. } => "a document is not valid UTF-8",
+            Self::DuplicateKeyword { .. } => "the manifest contains duplicate keywords",
+        }
+    }
+}
+
 fn validate_relative_markdown_path(path_value: &str) -> Result<(), ContextError> {
     let path = Path::new(path_value);
     let normal_components = !path_value.is_empty()

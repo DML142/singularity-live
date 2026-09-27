@@ -322,14 +322,38 @@ fn event_delimiter_length(buffer: &[u8], event_end: usize) -> usize {
 }
 
 fn classify_status(status: StatusCode) -> ProviderError {
-    let kind = match status.as_u16() {
-        401 | 403 => ProviderErrorKind::Authentication,
-        400 | 404 | 422 => ProviderErrorKind::InvalidRequest,
-        408 | 504 => ProviderErrorKind::Timeout,
-        429 => ProviderErrorKind::RateLimit,
-        _ => ProviderErrorKind::Provider,
+    let (kind, message) = match status.as_u16() {
+        401 => (
+            ProviderErrorKind::Authentication,
+            "OpenRouter rejected the API key",
+        ),
+        403 => (
+            ProviderErrorKind::Authentication,
+            "OpenRouter denied access to this account or model",
+        ),
+        402 => (
+            ProviderErrorKind::Provider,
+            "OpenRouter requires credits or an available free-request quota",
+        ),
+        400 | 422 => (
+            ProviderErrorKind::InvalidRequest,
+            "OpenRouter rejected the model or request format",
+        ),
+        404 => (
+            ProviderErrorKind::InvalidRequest,
+            "OpenRouter could not find an available endpoint for this model",
+        ),
+        408 | 504 => (ProviderErrorKind::Timeout, "OpenRouter request timed out"),
+        429 => (
+            ProviderErrorKind::RateLimit,
+            "OpenRouter rate limit reached",
+        ),
+        _ => (
+            ProviderErrorKind::Provider,
+            "OpenRouter rejected the request",
+        ),
     };
-    safe_error(kind, "The provider rejected the request")
+    safe_error(kind, &format!("{message} (HTTP {})", status.as_u16()))
 }
 
 fn classify_stream_error(error: &OpenRouterStreamError) -> ProviderError {
