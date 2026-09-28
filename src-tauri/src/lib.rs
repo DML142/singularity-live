@@ -2,10 +2,9 @@ use std::{path::Path, sync::Arc};
 
 use app::SessionService;
 use capture::{ScreenCaptureService, TransientImageStore, platform_capture_backend};
-use config::{AppConfig, EnvironmentConfigSource};
 use context::UserContextService;
+use provider_settings::{ProviderFileSecretStore, ProviderSettingsStore};
 use providers::ProviderRouter;
-use secrets::EnvironmentSecretStore;
 use shortcuts::capture_coordinator::{
     HotkeyCaptureCoordinator, TauriCaptureWindow, TauriHotkeyCaptureEventSink,
 };
@@ -25,6 +24,7 @@ pub mod config;
 pub mod context;
 pub mod customization;
 pub mod domain;
+pub mod provider_settings;
 pub mod providers;
 pub mod secrets;
 pub mod shortcuts;
@@ -64,6 +64,9 @@ pub fn run() {
             commands::user_context::get_user_context_files,
             commands::user_context::add_user_context_files,
             commands::user_context::remove_user_context_file,
+            commands::provider_settings::get_provider_settings,
+            commands::provider_settings::save_provider_profile,
+            commands::provider_settings::open_provider_settings_file,
             commands::manual_assistance::get_manual_assistance_readiness,
             commands::manual_assistance::start_manual_assistance,
             commands::manual_assistance::cancel_manual_assistance,
@@ -92,8 +95,25 @@ pub fn run() {
 fn setup_application(
     application: &mut tauri::App<tauri::Wry>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if let Ok(app_data_directory) = application.path().app_data_dir() {
+        install_default_context_pack(&app_data_directory)?;
+    }
+    let settings_path = application
+        .path()
+        .app_config_dir()
+        .or_else(|_| application.path().app_data_dir())
+        .map(|directory| directory.join("provider-settings.json"))?;
+    let provider_settings = Arc::new(ProviderSettingsStore::new(settings_path));
+    let secret_store: Arc<dyn secrets::SecretStore> = Arc::new(ProviderFileSecretStore::new(
+        ProviderSettingsStore::new(provider_settings.path().to_owned()),
+    ));
+    application.manage(Arc::clone(&provider_settings));
     let service = match application.path().app_data_dir() {
-        Ok(app_data_directory) => session_service(&app_data_directory),
+        Ok(app_data_directory) => session_service(
+            &app_data_directory,
+            Arc::clone(&provider_settings),
+            Arc::clone(&secret_store),
+        ),
         Err(_) => Arc::new(SessionService::unconfigured(
             "The application data directory is unavailable".to_owned(),
         )),
@@ -118,7 +138,7 @@ fn setup_application(
     );
     application.manage(user_context);
     let voice_input = Arc::new(VoiceInputService::new(
-        Arc::new(EnvironmentSecretStore),
+        Arc::clone(&secret_store),
         Arc::new(TauriVoiceInputEventSink(application.handle().clone())),
         application
             .path()
@@ -323,8 +343,12 @@ impl VoiceInputEventSink for TauriVoiceInputEventSink {
     }
 }
 
-fn session_service(app_data_directory: &Path) -> Arc<SessionService> {
-    let config = match AppConfig::from_source(&EnvironmentConfigSource) {
+fn session_service(
+    app_data_directory: &Path,
+    provider_settings: Arc<ProviderSettingsStore>,
+    secret_store: Arc<dyn secrets::SecretStore>,
+) -> Arc<SessionService> {
+    let config = match provider_settings.app_config() {
         Ok(config) => config,
         Err(error) => {
             return Arc::new(SessionService::unconfigured(error.to_string()));
@@ -336,13 +360,44 @@ fn session_service(app_data_directory: &Path) -> Arc<SessionService> {
     let context_pack_id = config.context_pack().to_owned();
     let router = Arc::new(ProviderRouter::new(
         config,
-        Arc::new(EnvironmentSecretStore),
+        Arc::clone(&secret_store),
         reqwest::Client::new(),
     ));
-    Arc::new(SessionService::configured(
+    Arc::new(SessionService::configured_with_provider_settings(
         app_data_directory.to_owned(),
         context_pack_directory,
         context_pack_id,
         router,
+        provider_settings,
+        secret_store,
     ))
+}
+
+fn install_default_context_pack(app_data_directory: &Path) -> std::io::Result<()> {
+    let pack_directory = app_data_directory
+        .join("context-packs")
+        .join("fictional-developer");
+    std::fs::create_dir_all(&pack_directory)?;
+    for (name, content) in [
+        (
+            "manifest.yaml",
+            include_str!("../../docs/examples/context-packs/fictional-developer/manifest.yaml"),
+        ),
+        (
+            "answer-style.md",
+            include_str!("../../docs/examples/context-packs/fictional-developer/answer-style.md"),
+        ),
+        (
+            "sample-projects.md",
+            include_str!(
+                "../../docs/examples/context-packs/fictional-developer/sample-projects.md"
+            ),
+        ),
+    ] {
+        let file_path = pack_directory.join(name);
+        if !file_path.exists() {
+            std::fs::write(file_path, content)?;
+        }
+    }
+    Ok(())
 }

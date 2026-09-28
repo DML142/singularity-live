@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AssistantPanel } from "../features/assistant/AssistantPanel";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
@@ -10,6 +10,7 @@ import { subscribeMinModeToggle } from "../lib/tauri/shortcut-client";
 import { useApplicationStatusStore } from "../stores/application-status-store";
 import { useScreenAssistanceStore } from "../stores/screen-assistance-store";
 import { listenForHotkeyCapture } from "../lib/tauri/hotkey-capture-client";
+import { useManualAssistanceStore } from "../stores/manual-assistance-store";
 import { useVoiceInputStore } from "../stores/voice-input-store";
 
 export function App() {
@@ -18,6 +19,7 @@ export function App() {
   const devAssistTask = import.meta.env.VITE_SINGULARITY_LIVE_DEV_ASSIST_TASK;
   const backend = useApplicationStatusStore((state) => state.backend);
   const loadStatus = useApplicationStatusStore((state) => state.loadStatus);
+  const loadReadiness = useManualAssistanceStore((state) => state.loadReadiness);
   const initializeVoiceInput = useVoiceInputStore((state) => state.initialize);
   const voiceSource = useVoiceInputStore((state) => state.source);
   const voiceDevices = useVoiceInputStore((state) => state.devices);
@@ -41,10 +43,18 @@ export function App() {
       : (voiceDevices.find((device) => device.id === microphoneDeviceId)?.label ??
         voiceDevices.find((device) => device.isDefault)?.label ??
         "Default microphone");
+  const wasSettingsOpen = useRef(settingsOpen);
 
   useEffect(() => {
     void loadStatus();
   }, [loadStatus]);
+
+  useEffect(() => {
+    if (wasSettingsOpen.current && !settingsOpen) {
+      void loadReadiness();
+    }
+    wasSettingsOpen.current = settingsOpen;
+  }, [loadReadiness, settingsOpen]);
 
   useEffect(() => {
     let active = true;

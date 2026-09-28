@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 import {
   APP_SCALE_STEP,
@@ -32,6 +39,13 @@ import {
   removeUserContextFile,
   type UserContextFileInfo,
 } from "../../lib/tauri/user-context-client";
+import {
+  getProviderSettings,
+  openProviderSettingsFile,
+  saveProviderProfile,
+  type ProviderId,
+  type ProviderSettings,
+} from "../../lib/tauri/provider-settings-client";
 import { recordedShortcutFromEvent } from "./key-chord";
 
 interface SettingsPanelProps {
@@ -40,7 +54,7 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ onBack }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<
-    "binds" | "audio" | "customization" | "context"
+    "binds" | "audio" | "customization" | "context" | "providers"
   >("binds");
   const [views, setViews] = useState<readonly ShortcutBindingView[]>([]);
   const [drafts, setDrafts] = useState<readonly ShortcutBinding[]>([]);
@@ -161,7 +175,9 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                 ? "Audio input"
                 : activeTab === "context"
                   ? "Context files"
-                  : "Customization"}
+                  : activeTab === "providers"
+                    ? "AI models and API keys"
+                    : "Customization"}
           </h2>
           <p className="settings-description">
             {activeTab === "binds"
@@ -170,7 +186,9 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                 ? "Choose the microphone or system audio source used by voice transcription."
                 : activeTab === "context"
                   ? "Choose Markdown and text files that are included with every assistant request."
-                  : "Adjust window appearance, app scale, and screenshot capture settings."}
+                  : activeTab === "providers"
+                    ? "Choose the assistant model and configure local provider keys."
+                    : "Adjust window appearance, app scale, and screenshot capture settings."}
           </p>
         </div>
         <button className="settings-back-button" type="button" onClick={onBack}>
@@ -231,9 +249,24 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
         >
           Context
         </button>
+        <button
+          className="settings-tab"
+          type="button"
+          role="tab"
+          id="settings-tab-providers"
+          aria-controls="settings-panel-providers"
+          aria-selected={activeTab === "providers"}
+          onClick={() => {
+            setActiveTab("providers");
+          }}
+        >
+          AI & keys
+        </button>
       </div>
 
-      {activeTab === "context" ? (
+      {activeTab === "providers" ? (
+        <ProviderSettings />
+      ) : activeTab === "context" ? (
         <ContextFilesSettings />
       ) : activeTab === "customization" ? (
         <CustomizationSettings />
@@ -401,6 +434,230 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
         </div>
       )}
     </section>
+  );
+}
+
+const MODEL_PROFILES = [
+  {
+    provider: "open_ai",
+    model: "gpt-6-luna",
+    label: "OpenAI · GPT-6 Luna",
+  },
+  {
+    provider: "gemini",
+    model: "gemini-3.8-flash",
+    label: "Google AI Studio · Gemini 3.8 Flash",
+  },
+  {
+    provider: "open_router",
+    model: "openrouter/free",
+    label: "OpenRouter · Free model router",
+  },
+] as const satisfies readonly {
+  readonly provider: ProviderId;
+  readonly model: string;
+  readonly label: string;
+}[];
+
+function profileValue(provider: ProviderId, model: string): string {
+  return `${provider}|${model}`;
+}
+
+function keyStatusLabel(status: "configured" | "missing"): string {
+  return status === "configured" ? "configured" : "not set";
+}
+
+function ProviderSettings() {
+  const [settings, setSettings] = useState<ProviderSettings | null>(null);
+  const [selection, setSelection] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const loaded = await getProviderSettings();
+      setSettings(loaded);
+      setSelection(profileValue(loaded.provider, loaded.model));
+    } catch {
+      setError("Provider settings could not be loaded. Check the local settings file.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getProviderSettings()
+      .then((loaded) => {
+        if (active) {
+          setSettings(loaded);
+          setSelection(profileValue(loaded.provider, loaded.model));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setError(
+            "Provider settings could not be loaded. Check the local settings file.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedProfile = MODEL_PROFILES.find(
+    (profile) => profileValue(profile.provider, profile.model) === selection,
+  );
+  const isDirty =
+    settings !== null && selection !== profileValue(settings.provider, settings.model);
+
+  async function save(): Promise<void> {
+    if (selectedProfile === undefined) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await saveProviderProfile(
+        selectedProfile.provider,
+        selectedProfile.model,
+      );
+      setSettings(saved);
+      setSelection(profileValue(saved.provider, saved.model));
+    } catch {
+      setError("The selected model could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function openFile(): Promise<void> {
+    setOpening(true);
+    setError(null);
+    try {
+      await openProviderSettingsFile();
+    } catch {
+      setError("The provider settings file could not be opened.");
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  return (
+    <div
+      id="settings-panel-providers"
+      className="provider-settings"
+      role="tabpanel"
+      aria-labelledby="settings-tab-providers"
+    >
+      {loading ? (
+        <p className="settings-status" role="status">
+          Loading AI settings…
+        </p>
+      ) : settings === null ? (
+        <p className="settings-status" role="status">
+          The local provider settings file is not available.
+        </p>
+      ) : (
+        <>
+          <label className="settings-field">
+            <span>Text and screenshot model</span>
+            <select
+              aria-label="Text and screenshot model"
+              value={selection}
+              disabled={saving}
+              onChange={(event) => {
+                setSelection(event.currentTarget.value);
+                setError(null);
+              }}
+            >
+              {!MODEL_PROFILES.some(
+                (profile) =>
+                  profileValue(profile.provider, profile.model) === selection,
+              ) && <option value={selection}>Current model · {settings.model}</option>}
+              {MODEL_PROFILES.map((profile) => (
+                <option
+                  key={profileValue(profile.provider, profile.model)}
+                  value={profileValue(profile.provider, profile.model)}
+                >
+                  {profile.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className="settings-status">
+            Context pack: <strong>{settings.contextPack}</strong>
+          </p>
+
+          <div className="provider-key-status" aria-label="API key status">
+            <p>
+              OpenAI: <strong>{keyStatusLabel(settings.keys.openai)}</strong>
+            </p>
+            <p>
+              OpenRouter: <strong>{keyStatusLabel(settings.keys.openrouter)}</strong>
+            </p>
+            <p>
+              Gemini: <strong>{keyStatusLabel(settings.keys.gemini)}</strong>
+            </p>
+            <p>
+              Soniox voice transcription:{" "}
+              <strong>{keyStatusLabel(settings.keys.soniox)}</strong>
+            </p>
+          </div>
+
+          <p className="settings-status">
+            Add the key for the selected provider to the local JSON file. The app never
+            sends key values through the webview. Keys are stored as plain text and can
+            be read by software with access to your account. After editing, return here
+            and refresh the key status.
+          </p>
+          <p className="provider-settings-path">{settings.filePath}</p>
+
+          {error !== null && (
+            <p className="settings-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="provider-settings-actions">
+            <button
+              className="settings-add-button"
+              type="button"
+              disabled={opening || saving}
+              onClick={() => void openFile()}
+            >
+              {opening ? "Opening…" : "Open API key file"}
+            </button>
+            <button
+              className="settings-add-button"
+              type="button"
+              disabled={opening || saving}
+              onClick={() => void refresh()}
+            >
+              Refresh key status
+            </button>
+            <button
+              className="settings-save-button"
+              type="button"
+              disabled={!isDirty || saving || selectedProfile === undefined}
+              onClick={() => void save()}
+            >
+              {saving ? "Saving…" : "Save model"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

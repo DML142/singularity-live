@@ -23,9 +23,11 @@ The shell currently provides:
 - an always-on-top main window and a Rust-owned capture, permission, and image lifecycle;
 - Windows capture-protection configuration for the main window, pending manual OBS validation;
 - a Binds settings view for adding screenshot and voice-input shortcuts;
+- an AI & keys settings view for selecting a provider profile and opening the local key file;
 - microphone or system-audio capture with local silence filtering and manual transcript review;
 - Rust-owned context loading, provider configuration, credentials, routing, and streaming;
 - safe setup guidance when the selected provider or context pack is unavailable;
+- first-run seeding of the example context pack and a key-free default model profile;
 - exact Tauri permissions for status, readiness, start, and cancel commands.
 
 ## Technology
@@ -50,6 +52,40 @@ Exact resolved dependency versions are captured in `pnpm-lock.yaml` and
 
 On Ubuntu 24.04, the native development packages used by CI are listed in
 `.github/workflows/ci.yml`.
+
+## Windows executable
+
+Build the current Windows executable without creating an installer:
+
+```powershell
+pnpm build:exe
+```
+
+The output is `src-tauri/target/release/singularity-live.exe`. Run it and open **Settings →
+AI & keys**. Choose a model, save it, then use **Open API key file** to reveal
+`provider-settings.json` in Explorer. Add the key under `openaiApiKey`, `openrouterApiKey`,
+or `geminiApiKey`, save the JSON file, and refresh the key status. The assistant becomes
+available when the selected provider's key is present. `sonioxApiKey` is optional and enables
+voice transcription.
+
+The file uses this shape; leave keys for unused providers empty:
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-6-luna",
+  "contextPack": "fictional-developer",
+  "openaiApiKey": "",
+  "openrouterApiKey": "",
+  "geminiApiKey": "",
+  "sonioxApiKey": ""
+}
+```
+
+The settings file is stored in the application's local configuration directory. It contains
+plain-text keys, stays on that machine, and is read only by Rust. The webview receives key
+presence indicators but never the key values. The app seeds the fictional example context
+pack into its application data directory on first launch.
 
 ## Development
 
@@ -104,11 +140,11 @@ export SINGULARITY_LIVE_CONTEXT_PACK=fictional-developer
 pnpm tauri dev
 ```
 
-For real-time incoming voice transcription, also set `SONIOX_API_KEY`. `pnpm assist` asks
-for it optionally with hidden input. The app uses Soniox `stt-rt-v5` for microphone or Windows
+For real-time incoming voice transcription, also set `SONIOX_API_KEY` in the local settings
+file for the packaged app. `pnpm assist` asks for it optionally with hidden input. The app uses Soniox `stt-rt-v5` for microphone or Windows
 system-audio input, then places the finalized transcript in the composer for editing and
 manual sending. Without the Soniox key, text and screenshot assistance still work, but voice
-input is unavailable. Keys remain in the desktop process environment and are not saved.
+input is unavailable. Development environment variables continue to override the local file.
 
 ## Alternative text providers
 
@@ -163,7 +199,7 @@ Context packs are read from Tauri's platform-specific application data directory
 - macOS: `~/Library/Application Support/local.singularity.live`.
 - Windows: `%APPDATA%\local.singularity.live`.
 
-These bases come from Tauri's [`app_data_dir()`](https://docs.rs/tauri/latest/tauri/path/struct.PathResolver.html#method.app_data_dir) API. Copy the sanitized example into the configured directory, for example:
+These bases come from Tauri's [`app_data_dir()`](https://docs.rs/tauri/latest/tauri/path/struct.PathResolver.html#method.app_data_dir) API. The app copies its sanitized example pack there on first launch. The pack path for the default profile is:
 
 ```text
 <app-data>/context-packs/fictional-developer/
@@ -172,7 +208,7 @@ These bases come from Tauri's [`app_data_dir()`](https://docs.rs/tauri/latest/ta
 └── sample-projects.md
 ```
 
-The repository example is in [`docs/examples/context-packs/fictional-developer`](docs/examples/context-packs/fictional-developer). Copy that directory's contents into the runtime path; the app never reads context from the repository checkout.
+The source for the seeded pack is in [`docs/examples/context-packs/fictional-developer`](docs/examples/context-packs/fictional-developer); the app embeds those files and never reads context from the repository checkout at runtime.
 
 Manifest schema version 1 contains a pack ID, a display name, and at most 16 Markdown
 documents. Packs outside app data, symlinked pack directories, unknown fields, invalid or
