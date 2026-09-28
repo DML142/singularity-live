@@ -38,6 +38,9 @@ impl ShortcutPlatform {
 #[serde(rename_all = "snake_case")]
 pub enum ShortcutAction {
     Screenshot,
+    ScreenshotSend,
+    #[serde(alias = "toggle_window")]
+    ToggleTaskbarIcon,
     VoiceInput,
     QuickSend,
 }
@@ -227,12 +230,28 @@ pub struct ShortcutBindings;
 impl ShortcutBindings {
     #[must_use]
     pub fn defaults(_platform: ShortcutPlatform) -> Vec<ShortcutBinding> {
-        let default_chord = ShortcutChord {
-            modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Super],
-            key: ShortcutKey("KeyP".to_owned()),
-        };
         vec![
-            ShortcutBinding::new(ShortcutAction::Screenshot, Some(default_chord)),
+            ShortcutBinding::new(
+                ShortcutAction::Screenshot,
+                Some(ShortcutChord {
+                    modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Super],
+                    key: ShortcutKey("KeyP".to_owned()),
+                }),
+            ),
+            ShortcutBinding::new(
+                ShortcutAction::ScreenshotSend,
+                Some(ShortcutChord {
+                    modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Alt],
+                    key: ShortcutKey("KeyS".to_owned()),
+                }),
+            ),
+            ShortcutBinding::new(
+                ShortcutAction::ToggleTaskbarIcon,
+                Some(ShortcutChord {
+                    modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Alt],
+                    key: ShortcutKey("KeyH".to_owned()),
+                }),
+            ),
             ShortcutBinding::new(ShortcutAction::VoiceInput, None),
             ShortcutBinding::new(ShortcutAction::QuickSend, None),
         ]

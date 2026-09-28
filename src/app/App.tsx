@@ -14,6 +14,9 @@ export function App() {
   const backend = useApplicationStatusStore((state) => state.backend);
   const loadStatus = useApplicationStatusStore((state) => state.loadStatus);
   const initializeVoiceInput = useVoiceInputStore((state) => state.initialize);
+  const voiceSource = useVoiceInputStore((state) => state.source);
+  const voiceDevices = useVoiceInputStore((state) => state.devices);
+  const microphoneDeviceId = useVoiceInputStore((state) => state.microphoneDeviceId);
   const acceptHotkeyCapture = useScreenAssistanceStore(
     (state) => state.acceptHotkeyCapture,
   );
@@ -24,6 +27,12 @@ export function App() {
     },
     [acceptHotkeyCapture],
   );
+  const audioInputLabel =
+    voiceSource === "system_audio"
+      ? "System audio"
+      : (voiceDevices.find((device) => device.id === microphoneDeviceId)?.label ??
+        voiceDevices.find((device) => device.isDefault)?.label ??
+        "Default microphone");
 
   useEffect(() => {
     void loadStatus();
@@ -105,6 +114,9 @@ export function App() {
             <span aria-hidden="true" />
             {backend.label}
           </div>
+          <span className="audio-input-status" title={audioInputLabel}>
+            {audioInputLabel}
+          </span>
           <button
             className="settings-button"
             type="button"

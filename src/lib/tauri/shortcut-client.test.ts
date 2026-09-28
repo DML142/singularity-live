@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
 import {
   formatShortcutChord,
   getShortcutBindings,
   updateShortcutBindings,
+  type ShortcutAction,
   type ShortcutBindingView,
 } from "./shortcut-client";
 
@@ -67,6 +69,14 @@ describe("shortcut settings IPC client", () => {
     await expect(updateShortcutBindings([quickSendView.binding])).resolves.toEqual([
       quickSendView,
     ]);
+  });
+
+  it("accepts the screenshot-send and window-visibility actions", () => {
+    const actions: readonly ShortcutAction[] = [
+      "screenshot_send",
+      "toggle_taskbar_icon",
+    ];
+    expect(actions).toEqual(["screenshot_send", "toggle_taskbar_icon"]);
   });
 
   it("displays the platform-equivalent Super key label", () => {

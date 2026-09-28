@@ -4,7 +4,8 @@ use serde::Deserialize;
 use tauri::State;
 
 use crate::voice::{
-    AudioInputSource, VoiceInputService, list_audio_input_devices as available_audio_inputs,
+    AudioInputSource, VoiceInputService, VoiceInputSettings,
+    list_audio_input_devices as available_audio_inputs,
 };
 
 #[derive(Deserialize)]
@@ -20,6 +21,13 @@ pub async fn list_audio_input_devices() -> Result<Vec<crate::voice::AudioInputDe
         .await
         .map_err(|_| "Audio input devices could not be listed".to_owned())?
         .map_err(|error| error.safe_message().to_owned())
+}
+
+#[tauri::command]
+pub async fn get_voice_input_settings(
+    service: State<'_, Arc<VoiceInputService>>,
+) -> Result<VoiceInputSettings, String> {
+    Ok(service.settings().await)
 }
 
 #[tauri::command]

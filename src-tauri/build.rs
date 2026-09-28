@@ -15,6 +15,7 @@ fn main() {
         "get_shortcut_bindings",
         "update_shortcut_bindings",
         "list_audio_input_devices",
+        "get_voice_input_settings",
         "set_voice_input_source",
         "start_voice_input",
         "stop_voice_input",

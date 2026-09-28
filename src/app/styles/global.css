@@ -142,6 +142,14 @@ button:focus-visible {
 .backend-status[data-state="unavailable"] > span {
   background: var(--color-signal);
 }
+.audio-input-status {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--color-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .settings-button {
   border: 1px solid var(--color-line);
   border-radius: 5px;
@@ -481,6 +489,21 @@ button:focus-visible {
   margin: 0;
   font-size: 14px;
   font-weight: 620;
+}
+.audio-device-control {
+  display: grid;
+  max-width: 420px;
+  gap: 8px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.audio-device-control select {
+  min-height: 38px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 5px;
+  padding: 8px 10px;
+  background: var(--color-canvas);
+  color: var(--color-text);
 }
 .opacity-control {
   display: grid;
@@ -888,7 +911,8 @@ button:focus-visible {
   gap: 8px;
 }
 .assistant-send,
-.assistant-cancel {
+.assistant-cancel,
+.assistant-record {
   min-width: 66px;
   border: 1px solid var(--color-line-strong);
   border-radius: 4px;
@@ -904,20 +928,41 @@ button:focus-visible {
   color: #171714;
   font-weight: 650;
 }
+.assistant-record {
+  min-width: 66px;
+  color: var(--color-muted);
+}
+.assistant-record[aria-pressed="true"] {
+  border-color: var(--color-signal);
+  color: var(--color-signal);
+}
 .assistant-cancel {
   color: var(--color-muted);
 }
 .assistant-send:hover:not(:disabled) {
   background: #f0bd5c;
 }
-.assistant-cancel:hover:not(:disabled) {
+.assistant-cancel:hover:not(:disabled),
+.assistant-record:hover:not(:disabled) {
   border-color: var(--color-ready);
   color: var(--color-text);
 }
 .assistant-send:disabled,
-.assistant-cancel:disabled {
+.assistant-cancel:disabled,
+.assistant-record:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+.voice-capture-status,
+.voice-capture-error {
+  margin: 0;
+  padding: 0 14px 7px;
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.voice-capture-error {
+  color: #f19a86;
 }
 .sr-only {
   position: absolute;
@@ -1034,4 +1079,8 @@ button:focus-visible {
   .assistant-composer {
     transition: none;
   }
+}
+
+* {
+  cursor: default !important;
 }

@@ -12,6 +12,8 @@ use shortcuts::{
     ShortcutAction, ShortcutBindingService, ShortcutConfigStore, ShortcutPlatform,
     platform_shortcut_registrar,
 };
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use voice::{VoiceInputEvent, VoiceInputEventSink, VoiceInputService};
 
@@ -39,20 +41,15 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(setup_application)
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. })
-                && let Some(coordinator) = window
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+                if let Some(coordinator) = window
                     .app_handle()
                     .try_state::<Arc<HotkeyCaptureCoordinator>>()
-            {
-                coordinator.cancel_active();
-            }
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. })
-                && let Some(voice_input) = window.app_handle().try_state::<Arc<VoiceInputService>>()
-            {
-                let service = Arc::clone(&voice_input);
-                tauri::async_runtime::spawn(async move {
-                    service.stop().await;
-                });
+                {
+                    coordinator.cancel_active();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -74,6 +71,7 @@ pub fn run() {
             commands::shortcuts::update_shortcut_bindings,
             commands::voice_input::set_voice_input_source,
             commands::voice_input::list_audio_input_devices,
+            commands::voice_input::get_voice_input_settings,
             commands::voice_input::start_voice_input,
             commands::voice_input::stop_voice_input,
         ])
@@ -107,6 +105,12 @@ fn setup_application(
     let voice_input = Arc::new(VoiceInputService::new(
         Arc::new(EnvironmentSecretStore),
         Arc::new(TauriVoiceInputEventSink(application.handle().clone())),
+        application
+            .path()
+            .app_config_dir()
+            .or_else(|_| application.path().app_data_dir())
+            .ok()
+            .map(|directory| directory.join("voice-input.json")),
     ));
     application.manage(Arc::clone(&voice_input));
     let captures = Arc::new(ScreenCaptureService::new(
@@ -118,6 +122,7 @@ fn setup_application(
         .get_webview_window("main")
         .ok_or_else(|| std::io::Error::other("The main application window is unavailable"))?;
     window.set_always_on_top(true)?;
+    build_system_tray(application)?;
     let manual_session = Arc::clone(&service);
     let coordinator = Arc::new(HotkeyCaptureCoordinator::new(
         captures,
@@ -128,6 +133,15 @@ fn setup_application(
         Arc::new(move || manual_session.has_active_request()),
     ));
     application.manage(Arc::clone(&coordinator));
+    setup_shortcuts(application, &coordinator, &voice_input);
+    Ok(())
+}
+
+fn setup_shortcuts(
+    application: &tauri::App<tauri::Wry>,
+    coordinator: &Arc<HotkeyCaptureCoordinator>,
+    voice_input: &Arc<VoiceInputService>,
+) {
     let shortcut_store = application
         .path()
         .app_config_dir()
@@ -141,15 +155,23 @@ fn setup_application(
                 )
             },
         );
-    let shortcut_coordinator = Arc::clone(&coordinator);
-    let shortcut_voice_input = Arc::clone(&voice_input);
+    let shortcut_coordinator = Arc::clone(coordinator);
+    let shortcut_voice_input = Arc::clone(voice_input);
     let shortcut_application = application.handle().clone();
+    let taskbar_icon_hidden = Arc::new(std::sync::Mutex::new(false));
+    let shortcut_taskbar_icon_hidden = Arc::clone(&taskbar_icon_hidden);
     let activation = Arc::new(move |action| match action {
         ShortcutAction::Screenshot => {
             let coordinator = Arc::clone(&shortcut_coordinator);
             tauri::async_runtime::spawn(async move {
                 coordinator.capture_from_hotkey().await;
             });
+        }
+        ShortcutAction::ScreenshotSend => {
+            let _ = shortcut_application.emit("singularity:screenshot-send", ());
+        }
+        ShortcutAction::ToggleTaskbarIcon => {
+            toggle_taskbar_icon(&shortcut_application, &shortcut_taskbar_icon_hidden);
         }
         ShortcutAction::VoiceInput => {
             let voice_input = Arc::clone(&shortcut_voice_input);
@@ -170,7 +192,69 @@ fn setup_application(
     tauri::async_runtime::spawn(async move {
         let _ = bindings.initialize().await;
     });
+}
+
+fn build_system_tray(application: &tauri::App<tauri::Wry>) -> tauri::Result<()> {
+    let show = MenuItem::with_id(
+        application,
+        "show",
+        "Show Singularity Live",
+        true,
+        None::<&str>,
+    )?;
+    let hide = MenuItem::with_id(application, "hide", "Hide window", true, None::<&str>)?;
+    let quit = MenuItem::with_id(application, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(application, &[&show, &hide, &quit])?;
+    let mut tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("Singularity Live")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|application, event| match event.id().as_ref() {
+            "show" => show_main_window(application),
+            "hide" => {
+                if let Some(window) = application.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            "quit" => application.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = application.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(application)?;
     Ok(())
+}
+
+fn toggle_taskbar_icon(application: &tauri::AppHandle, hidden: &std::sync::Mutex<bool>) {
+    if let Some(window) = application.get_webview_window("main")
+        && let Ok(mut is_hidden) = hidden.lock()
+    {
+        let next_hidden = !*is_hidden;
+        if window.set_skip_taskbar(next_hidden).is_ok() {
+            *is_hidden = next_hidden;
+        }
+    }
+}
+
+fn show_main_window(application: &tauri::AppHandle) {
+    if let Some(window) = application.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 struct TauriVoiceInputEventSink(tauri::AppHandle);

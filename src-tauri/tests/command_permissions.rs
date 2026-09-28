@@ -89,6 +89,7 @@ fn main_window_can_select_microphones_and_update_window_appearance() {
 
     for (permission, command) in [
         ("allow-list-audio-input-devices", "list_audio_input_devices"),
+        ("allow-get-voice-input-settings", "get_voice_input_settings"),
         ("allow-get-window-opacity", "get_window_opacity"),
         ("allow-set-window-opacity", "set_window_opacity"),
     ] {

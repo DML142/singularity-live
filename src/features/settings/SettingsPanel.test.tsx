@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPanel } from "./SettingsPanel";
+import { useVoiceInputStore } from "../../stores/voice-input-store";
 import type {
   ShortcutBinding,
   ShortcutBindingView,
@@ -144,5 +145,23 @@ describe("Binds settings", () => {
       expect(setWindowOpacityMock).toHaveBeenCalledWith(75);
     });
     expect(document.documentElement).toHaveAttribute("data-app-opacity", "75");
+  });
+
+  it("shows microphone and system audio selection in the audio settings tab", async () => {
+    useVoiceInputStore.setState({
+      source: "microphone",
+      devices: [{ id: "usb-mic", label: "USB microphone", isDefault: true }],
+      microphoneDeviceId: null,
+    });
+    render(<SettingsPanel onBack={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Audio" }));
+
+    expect(await screen.findByRole("combobox", { name: "Audio source" })).toHaveValue(
+      "microphone",
+    );
+    expect(screen.getByRole("combobox", { name: "Microphone device" })).toHaveValue("");
+    expect(
+      screen.getByRole("option", { name: "USB microphone · default" }),
+    ).toBeInTheDocument();
   });
 });

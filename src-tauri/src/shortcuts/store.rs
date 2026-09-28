@@ -9,9 +9,12 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-use super::{BindingError, ShortcutBinding, ShortcutBindings, ShortcutPlatform, validate_bindings};
+use super::{
+    BindingError, ShortcutAction, ShortcutBinding, ShortcutBindings, ShortcutPlatform,
+    validate_bindings,
+};
 
-const CONFIG_VERSION: u32 = 1;
+const CONFIG_VERSION: u32 = 3;
 
 #[derive(Debug, Error)]
 pub enum BindingStoreError {
@@ -114,11 +117,18 @@ impl ShortcutConfigStore {
         };
         let config: VersionedShortcutConfig =
             serde_json::from_slice(&contents).map_err(BindingStoreError::Parse)?;
-        if config.version != CONFIG_VERSION {
-            return Err(BindingStoreError::UnsupportedVersion);
-        }
         validate_bindings(&config.bindings)?;
-        Ok(config.bindings)
+        match config.version {
+            CONFIG_VERSION => Ok(config.bindings),
+            1 | 2 => {
+                let bindings = add_migrated_actions(config.bindings, self.platform);
+                // Migration persistence is best effort: valid prior settings remain usable if
+                // the config directory is temporarily read-only.
+                let _ = self.save(&bindings);
+                Ok(bindings)
+            }
+            _ => Err(BindingStoreError::UnsupportedVersion),
+        }
     }
 
     /// Validates and atomically stores shortcut settings.
@@ -142,4 +152,27 @@ impl ShortcutConfigStore {
             .replace_atomically(path, &contents)
             .map_err(BindingStoreError::Write)
     }
+}
+
+fn add_migrated_actions(
+    mut bindings: Vec<ShortcutBinding>,
+    platform: ShortcutPlatform,
+) -> Vec<ShortcutBinding> {
+    for default in ShortcutBindings::defaults(platform)
+        .into_iter()
+        .filter(|binding| {
+            matches!(
+                binding.action,
+                ShortcutAction::ScreenshotSend | ShortcutAction::ToggleTaskbarIcon
+            )
+        })
+    {
+        if !bindings
+            .iter()
+            .any(|binding| binding.action == default.action)
+        {
+            bindings.push(default);
+        }
+    }
+    bindings
 }

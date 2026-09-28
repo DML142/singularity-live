@@ -6,7 +6,12 @@ const UUID_PATTERN =
 const MODIFIERS = ["control", "alt", "shift", "super"] as const;
 
 export type ShortcutModifier = (typeof MODIFIERS)[number];
-export type ShortcutAction = "screenshot" | "voice_input" | "quick_send";
+export type ShortcutAction =
+  | "screenshot"
+  | "screenshot_send"
+  | "toggle_taskbar_icon"
+  | "voice_input"
+  | "quick_send";
 
 export interface ShortcutChord {
   readonly modifiers: readonly ShortcutModifier[];
@@ -134,6 +139,8 @@ function isShortcutBinding(value: unknown): value is ShortcutBinding {
     hasExactKeys(value, ["id", "action", "chord"]) &&
     isUuid(value.id) &&
     (value.action === "screenshot" ||
+      value.action === "screenshot_send" ||
+      value.action === "toggle_taskbar_icon" ||
       value.action === "voice_input" ||
       value.action === "quick_send") &&
     (value.chord === null || isShortcutChord(value.chord))
@@ -143,6 +150,14 @@ function isShortcutBinding(value: unknown): value is ShortcutBinding {
 export async function subscribeQuickSend(onQuickSend: () => void): Promise<() => void> {
   return listen<unknown>("singularity:quick-send", () => {
     onQuickSend();
+  });
+}
+
+export async function subscribeScreenshotSend(
+  onScreenshotSend: () => void,
+): Promise<() => void> {
+  return listen<unknown>("singularity:screenshot-send", () => {
+    onScreenshotSend();
   });
 }
 
