@@ -80,6 +80,8 @@ struct VersionedVoiceInputSettings {
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum VoiceInputEvent {
     Started { source: AudioInputSource },
+    SourceChanged { source: AudioInputSource },
+    SourceChangeFailed { message: String },
     Transcript { text: String },
     Stopped { transcript: String },
     Failed { message: String },
@@ -161,6 +163,50 @@ impl VoiceInputService {
         write_voice_settings(path, &settings).map_err(|_| VoiceInputError::SettingsUnavailable)?;
         state.settings = settings;
         Ok(())
+    }
+
+    /// Switches the saved source between microphone and system audio.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error while voice input is active or when settings cannot be saved.
+    pub async fn toggle_source(&self) -> Result<(), VoiceInputError> {
+        let result = {
+            let mut state = self.state.lock().await;
+            if state
+                .session
+                .as_ref()
+                .is_some_and(|session| session.active.load(Ordering::Acquire))
+            {
+                Err(VoiceInputError::Busy)
+            } else {
+                let source = match state.settings.source {
+                    AudioInputSource::Microphone => AudioInputSource::SystemAudio,
+                    AudioInputSource::SystemAudio => AudioInputSource::Microphone,
+                };
+                let settings = VoiceInputSettings {
+                    source,
+                    microphone_device_id: state.settings.microphone_device_id.clone(),
+                };
+                match self.settings_path.as_deref() {
+                    Some(path) => match write_voice_settings(path, &settings) {
+                        Ok(()) => {
+                            state.settings = settings;
+                            Ok(source)
+                        }
+                        Err(_) => Err(VoiceInputError::SettingsUnavailable),
+                    },
+                    None => Err(VoiceInputError::SettingsUnavailable),
+                }
+            }
+        };
+        match result {
+            Ok(source) => self.events.emit(VoiceInputEvent::SourceChanged { source }),
+            Err(error) => self.events.emit(VoiceInputEvent::SourceChangeFailed {
+                message: error.safe_message().to_owned(),
+            }),
+        }
+        result.map(|_| ())
     }
 
     /// Connects to Soniox and starts capturing audio from the selected source.
@@ -870,9 +916,32 @@ fn is_speech(frame: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioInputSource, VoiceActivityGate, VoiceInputSettings, complete_text,
-        read_voice_settings, update_transcript, write_voice_settings,
+        AudioInputSource, VoiceActivityGate, VoiceInputEvent, VoiceInputEventSink,
+        VoiceInputService, VoiceInputSettings, complete_text, read_voice_settings,
+        update_transcript, write_voice_settings,
     };
+    use crate::secrets::{SecretError, SecretName, SecretStore, SecretValue};
+    use std::sync::{Arc, Mutex};
+
+    struct TestSecretStore;
+
+    impl SecretStore for TestSecretStore {
+        fn get(&self, name: SecretName) -> Result<SecretValue, SecretError> {
+            Err(SecretError::Missing { name })
+        }
+    }
+
+    #[derive(Default)]
+    struct TestVoiceEvents(Mutex<Vec<VoiceInputEvent>>);
+
+    impl VoiceInputEventSink for TestVoiceEvents {
+        fn emit(&self, event: VoiceInputEvent) {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(event);
+        }
+    }
 
     #[test]
     fn replaces_partial_words_and_preserves_final_tokens() {
@@ -930,6 +999,51 @@ mod tests {
             read_voice_settings(&path).expect("voice input settings load"),
             settings
         );
+    }
+
+    #[tokio::test]
+    async fn toggles_and_persists_the_voice_source_without_losing_the_selected_microphone() {
+        let directory = tempfile::tempdir().expect("temporary settings directory");
+        let path = directory.path().join("voice-input.json");
+        write_voice_settings(
+            &path,
+            &VoiceInputSettings {
+                source: AudioInputSource::Microphone,
+                microphone_device_id: Some("endpoint-1".to_owned()),
+            },
+        )
+        .expect("voice settings saved");
+        let events = Arc::new(TestVoiceEvents::default());
+        let service = VoiceInputService::new(
+            Arc::new(TestSecretStore),
+            events.clone(),
+            Some(path.clone()),
+        );
+
+        service.toggle_source().await.expect("source switched");
+        assert_eq!(
+            service.settings().await,
+            VoiceInputSettings {
+                source: AudioInputSource::SystemAudio,
+                microphone_device_id: Some("endpoint-1".to_owned()),
+            }
+        );
+        assert_eq!(
+            read_voice_settings(&path)
+                .expect("voice settings reloaded")
+                .source,
+            AudioInputSource::SystemAudio
+        );
+        assert!(matches!(
+            events
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .last(),
+            Some(VoiceInputEvent::SourceChanged {
+                source: AudioInputSource::SystemAudio
+            })
+        ));
     }
 
     fn audio_frame(sample: i16) -> Vec<u8> {

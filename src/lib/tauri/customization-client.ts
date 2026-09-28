@@ -4,6 +4,10 @@ import type { CaptureTargetKind } from "./screen-assistance-client";
 
 export const DEFAULT_WINDOW_OPACITY = 100;
 export const MIN_WINDOW_OPACITY = 40;
+export const DEFAULT_APP_SCALE = 100;
+export const MIN_APP_SCALE = 70;
+export const MAX_APP_SCALE = 130;
+export const APP_SCALE_STEP = 10;
 
 export interface ScreenshotPreferences {
   readonly closeWindowOnScreenshot: boolean;
@@ -20,6 +24,19 @@ export async function setWindowOpacity(percentage: number): Promise<number> {
   }
   return parseWindowOpacity(
     await invoke<unknown>("set_window_opacity", { request: { percentage } }),
+  );
+}
+
+export async function getAppScale(): Promise<number> {
+  return parseAppScale(await invoke<unknown>("get_app_scale"));
+}
+
+export async function setAppScale(percentage: number): Promise<number> {
+  if (!isSupportedAppScale(percentage)) {
+    throw new Error("Invalid application scale");
+  }
+  return parseAppScale(
+    await invoke<unknown>("set_app_scale", { request: { percentage } }),
   );
 }
 
@@ -47,9 +64,26 @@ export function isSupportedOpacity(value: unknown): value is number {
   );
 }
 
+export function isSupportedAppScale(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_APP_SCALE &&
+    value <= MAX_APP_SCALE &&
+    value % APP_SCALE_STEP === 0
+  );
+}
+
 function parseWindowOpacity(value: unknown): number {
   if (!isSupportedOpacity(value)) {
     throw new Error("Invalid window opacity response");
+  }
+  return value;
+}
+
+function parseAppScale(value: unknown): number {
+  if (!isSupportedAppScale(value)) {
+    throw new Error("Invalid application scale response");
   }
   return value;
 }

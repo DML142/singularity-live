@@ -71,13 +71,21 @@ describe("shortcut settings IPC client", () => {
     ]);
   });
 
-  it("accepts the screenshot-send and window-visibility actions", () => {
+  it("accepts all built-in screenshot, audio, window, and composer actions", () => {
     const actions: readonly ShortcutAction[] = [
       "screenshot_send",
       "toggle_taskbar_icon",
+      "toggle_audio_source",
+      "toggle_click_through",
       "min_mode",
     ];
-    expect(actions).toEqual(["screenshot_send", "toggle_taskbar_icon", "min_mode"]);
+    expect(actions).toEqual([
+      "screenshot_send",
+      "toggle_taskbar_icon",
+      "toggle_audio_source",
+      "toggle_click_through",
+      "min_mode",
+    ]);
   });
 
   it("displays the platform-equivalent Super key label", () => {

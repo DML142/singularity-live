@@ -16,6 +16,8 @@ export interface VoiceInputSettings {
 
 export type VoiceInputEvent =
   | { readonly type: "started"; readonly source: AudioInputSource }
+  | { readonly type: "sourceChanged"; readonly source: AudioInputSource }
+  | { readonly type: "sourceChangeFailed"; readonly message: string }
   | { readonly type: "transcript"; readonly text: string }
   | { readonly type: "stopped"; readonly transcript: string }
   | { readonly type: "failed"; readonly message: string };
@@ -109,6 +111,15 @@ function parseVoiceInputEvent(value: unknown): VoiceInputEvent | null {
     (value.source === "microphone" || value.source === "system_audio")
   ) {
     return { type: "started", source: value.source };
+  }
+  if (
+    value.type === "sourceChanged" &&
+    (value.source === "microphone" || value.source === "system_audio")
+  ) {
+    return { type: "sourceChanged", source: value.source };
+  }
+  if (value.type === "sourceChangeFailed" && typeof value.message === "string") {
+    return { type: "sourceChangeFailed", message: value.message };
   }
   if (value.type === "transcript" && typeof value.text === "string") {
     return { type: "transcript", text: value.text };

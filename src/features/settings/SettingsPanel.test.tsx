@@ -18,11 +18,15 @@ const { getShortcutBindingsMock, updateShortcutBindingsMock } = vi.hoisted(() =>
 const {
   getWindowOpacityMock,
   setWindowOpacityMock,
+  getAppScaleMock,
+  setAppScaleMock,
   getScreenshotPreferencesMock,
   setScreenshotPreferencesMock,
 } = vi.hoisted(() => ({
   getWindowOpacityMock: vi.fn<() => Promise<number>>(),
   setWindowOpacityMock: vi.fn<(percentage: number) => Promise<number>>(),
+  getAppScaleMock: vi.fn<() => Promise<number>>(),
+  setAppScaleMock: vi.fn<(percentage: number) => Promise<number>>(),
   getScreenshotPreferencesMock: vi.fn<
     () => Promise<{
       readonly closeWindowOnScreenshot: boolean;
@@ -51,7 +55,13 @@ vi.mock("../../lib/tauri/shortcut-client", async () => {
   };
 });
 vi.mock("../../lib/tauri/customization-client", () => ({
+  DEFAULT_APP_SCALE: 100,
   DEFAULT_WINDOW_OPACITY: 100,
+  APP_SCALE_STEP: 10,
+  MIN_APP_SCALE: 70,
+  MAX_APP_SCALE: 130,
+  getAppScale: getAppScaleMock,
+  setAppScale: setAppScaleMock,
   getWindowOpacity: getWindowOpacityMock,
   setWindowOpacity: setWindowOpacityMock,
   getScreenshotPreferences: getScreenshotPreferencesMock,
@@ -74,6 +84,7 @@ describe("Binds settings", () => {
   beforeEach(() => {
     getShortcutBindingsMock.mockReset().mockResolvedValue([initialView]);
     getWindowOpacityMock.mockReset().mockResolvedValue(100);
+    getAppScaleMock.mockReset().mockResolvedValue(100);
     getScreenshotPreferencesMock.mockReset().mockResolvedValue({
       closeWindowOnScreenshot: false,
       targetKind: "monitor",
@@ -81,6 +92,7 @@ describe("Binds settings", () => {
     setWindowOpacityMock
       .mockReset()
       .mockImplementation((value) => Promise.resolve(value));
+    setAppScaleMock.mockReset().mockImplementation((value) => Promise.resolve(value));
     setScreenshotPreferencesMock
       .mockReset()
       .mockImplementation((preferences) => Promise.resolve(preferences));
@@ -159,6 +171,14 @@ describe("Binds settings", () => {
     expect(
       within(action).getByRole("option", { name: "Voice input · toggle recording" }),
     ).toBeInTheDocument();
+    expect(
+      within(action).getByRole("option", {
+        name: "Swap microphone / system audio",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(action).getByRole("option", { name: "Toggle mouse click-through" }),
+    ).toBeInTheDocument();
   });
 
   it("previews and saves the window opacity setting", async () => {
@@ -174,6 +194,22 @@ describe("Binds settings", () => {
       expect(setWindowOpacityMock).toHaveBeenCalledWith(75);
     });
     expect(document.documentElement).toHaveAttribute("data-app-opacity", "75");
+  });
+
+  it("saves application zoom in ten percent steps", async () => {
+    render(<SettingsPanel onBack={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Customization" }));
+
+    const slider = await screen.findByRole("slider", { name: /Scale/ });
+    expect(slider).toHaveAttribute("min", "70");
+    expect(slider).toHaveAttribute("max", "130");
+    expect(slider).toHaveAttribute("step", "10");
+    fireEvent.change(slider, { target: { value: "110" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save scale" }));
+
+    await waitFor(() => {
+      expect(setAppScaleMock).toHaveBeenCalledWith(110);
+    });
   });
 
   it("shows microphone and system audio selection in the audio settings tab", async () => {

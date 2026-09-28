@@ -11,6 +11,8 @@ export type ShortcutAction =
   | "screenshot_send"
   | "toggle_taskbar_icon"
   | "voice_input"
+  | "toggle_audio_source"
+  | "toggle_click_through"
   | "quick_send"
   | "min_mode";
 
@@ -143,6 +145,8 @@ function isShortcutBinding(value: unknown): value is ShortcutBinding {
       value.action === "screenshot_send" ||
       value.action === "toggle_taskbar_icon" ||
       value.action === "voice_input" ||
+      value.action === "toggle_audio_source" ||
+      value.action === "toggle_click_through" ||
       value.action === "quick_send" ||
       value.action === "min_mode") &&
     (value.chord === null || isShortcutChord(value.chord))

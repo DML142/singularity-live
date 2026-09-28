@@ -17,3 +17,7 @@ boundary, security posture, persistence strategy, or platform approach.
 - [0006 — Global screenshot shortcuts and Rust-owned capture lifecycle](0006-global-screenshot-shortcuts.md)
 - [0007 — Direct Gemini generation for text and screenshots](0007-gemini-generation.md)
 - [0008 — Windows broadcast capture protection](0008-windows-broadcast-capture-protection.md)
+- [0009 — OpenAI generation and Soniox voice transcription](0009-openai-soniox-providers.md)
+- [0010 — Transparent window opacity customization](0010-transparent-window-opacity.md)
+- [0011 — Screenshot messages and minmode](0011-screenshot-messages-and-minmode.md)
+- [0012 — Audio-source, click-through, and application-scale controls](0012-audio-source-click-through-and-scale.md)

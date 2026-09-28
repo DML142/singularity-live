@@ -129,6 +129,12 @@ export const useVoiceInputStore = create<VoiceInputState>((set, get) => ({
       case "started":
         set({ phase: "recording", source: event.source, transcript: "", error: null });
         break;
+      case "sourceChanged":
+        set({ source: event.source, error: null });
+        break;
+      case "sourceChangeFailed":
+        set({ error: event.message });
+        break;
       case "transcript":
         set({ transcript: event.text });
         break;
