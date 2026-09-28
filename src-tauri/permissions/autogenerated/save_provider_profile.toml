@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-provider-profile"
+description = "Enables the save_provider_profile command without any pre-configured scope."
+commands.allow = ["save_provider_profile"]
+
+[[permission]]
+identifier = "deny-save-provider-profile"
+description = "Denies the save_provider_profile command without any pre-configured scope."
+commands.deny = ["save_provider_profile"]

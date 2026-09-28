@@ -137,6 +137,8 @@ React owns:
   minimized without restoring it;
 - persisted window-opacity and application-scale preferences exposed through Settings →
   Customization;
+- Settings → AI & keys for choosing a provider/model, checking key presence, and revealing
+  the Rust-owned local settings file in the system file manager;
 - Settings → Context management for `.md` and `.txt` files that accompany every text or
   screenshot request;
 - actionable loading, empty, and safe error states.
@@ -156,6 +158,8 @@ Rust owns:
 - provider communication and routing;
 - Soniox WebSocket transcription and local voice activity filtering;
 - credential lookup behind the Rust `SecretStore` port;
+- provider profile and local key-file persistence, native file-manager integration, and
+  first-run installation of the bundled example context pack;
 - filesystem and platform paths;
 - microphone, system-audio loopback, and screen capture;
 - persistence and context loading, including Rust-owned customization settings;
@@ -205,11 +209,17 @@ commands `get_shortcut_bindings` and `update_shortcut_bindings`, plus `set_voice
 `get_screenshot_preferences`, `set_screenshot_preferences`, `get_user_context_files`,
 `add_user_context_files`, and `remove_user_context_file`. File selection and content
 persistence stay in Rust; the webview receives only names and opaque IDs. User context
-content is bounded and is not logged. It also receives
+content is bounded and is not logged. It also receives `get_provider_settings`,
+`save_provider_profile`, and `open_provider_settings_file`; these return profile metadata and
+key-presence flags, save provider/model choices, and reveal the settings file through a narrow
+native action. The webview never receives API key values. It also receives
 `core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
 permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
-logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
-development only; OS-backed credential storage remains future security work.
+logs, or IPC requests or responses. Packaged desktop builds read plain-text credentials from
+`provider-settings.json` under the application configuration directory; environment
+credentials remain supported for development and take precedence when set. The file is
+owner-only on Unix and inherits the application config directory's access controls on
+Windows. OS-backed credential storage remains future security work.
 
 Sensitive content is excluded from logs by default. API keys, authorization headers, raw
 audio, screenshots, full context packs, and full provider payloads must not be logged.
@@ -224,8 +234,8 @@ dependency.
 
 Soniox `stt-rt-v5` supplies streaming speech-to-text independently from text generation. Its
 Rust WebSocket adapter sends Russian, Ukrainian, and English language hints and technical
-terms, then emits a live transcript. User API keys are read from the desktop process
-environment and remain inside Rust. Automated checks use mocks; live OpenAI/Soniox requests
+terms, then emits a live transcript. User API keys are read by Rust from the local settings
+file or development process environment and remain inside Rust. Automated checks use mocks; live OpenAI/Soniox requests
 and real audio-device checks have not been verified yet. Evaluate Russian/Ukrainian technical
 transcripts, screenshot interpretation, code correctness, latency, and cost before calling
 either path production-ready.
@@ -685,8 +695,12 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
   with Rust-persisted, adjustable app-window opacity and application zoom.
 - Settings → Context file management for `.md` and `.txt` documents persisted by Rust and
   included in every text and screenshot request within explicit count and size limits.
-- Direct OpenAI GPT-6 Luna text and screenshot streaming alongside the OpenRouter and Gemini
-  adapters; OpenAI, Soniox, Gemini, and OpenRouter keys stay in the desktop environment.
+- Direct OpenAI GPT-6 Luna text and screenshot streaming alongside OpenRouter and Gemini;
+  API keys stay in Rust and may be loaded from the local provider settings file.
+- Settings → AI & keys for model-profile selection, key-presence status, and native reveal of
+  the editable `provider-settings.json` file; new requests reload saved profile and key data.
+- First-run installation of the sanitized example context pack and a Windows-only executable
+  build command (`pnpm build:exe`) that skips installer bundling.
 - A minmode bind that hides app chrome while keeping the conversation and composer visible.
 - Rust-persisted screenshot source selection and the optional “Close window on screenshot” setting.
 - Global shortcuts that swap the saved microphone/system-audio source and toggle mouse
@@ -830,6 +844,22 @@ not send a live provider request or capture a real desktop image.
 | Full project `pnpm check`                     | Passed on 2026-09-26: formatting, ESLint, TypeScript, frontend tests, production build, Rust fmt/Clippy/tests, and Cargo check                                             |
 | Live provider request and real screen capture | Not performed; automated acceptance used mocks and in-memory pixel fixtures                                                                                                |
 
+### Local provider settings and Windows executable validation
+
+This update stores API keys in an editable local settings file that remains inside Rust, adds
+provider/model selection in Settings, seeds the built-in example context pack on first launch,
+and builds a standalone Windows executable without an installer.
+
+| Check                             | Result                                                                                                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend typecheck and lint       | Passed on 2026-09-28                                                                                                                                                                                                |
+| Frontend production build         | Passed as part of `pnpm build:exe`                                                                                                                                                                                  |
+| Rust fmt, Clippy, and Cargo check | Passed on 2026-09-28                                                                                                                                                                                                |
+| Windows executable build          | Release binary compiled with the GUI subsystem and saved as `src-tauri/target/release/singularity-live-updated.exe`; the Tauri wrapper could not replace the usual output while the previous executable was running |
+| Changed-file Prettier check       | Passed                                                                                                                                                                                                              |
+| Repository-wide Prettier check    | Reports existing formatting warnings in 8 untouched files; no unrelated formatting changes were made                                                                                                                |
+| Automated tests                   | Not run for this update                                                                                                                                                                                             |
+
 ### Toolchain and tested versions
 
 The project requires Node.js 24 LTS, pnpm 12.5.1, and Rust 1.98.0. Exact JavaScript and
@@ -863,7 +893,8 @@ current stable compatible direct versions:
 - [ADR 0011: Screenshot messages and minmode](docs/adr/0011-screenshot-messages-and-minmode.md)
 - [ADR 0012: Audio-source, click-through, and application-scale controls](docs/adr/0012-audio-source-click-through-and-scale.md)
 - [ADR 0013: Persistent user context files](docs/adr/0013-user-context-files.md)
+- [ADR 0014: Local provider settings for desktop builds](docs/adr/0014-local-provider-settings.md)
 
-Future ADRs are created only for decisions that need durable context, including the secret
-store, SQLite/migration strategy, VAD implementation, and materially changed platform
+Future ADRs are created only for decisions that need durable context, including OS-backed
+secret storage, SQLite/migration strategy, VAD implementation, and materially changed platform
 boundaries. Routine implementation details do not require ADRs.

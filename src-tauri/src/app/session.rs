@@ -18,7 +18,9 @@ use crate::{
         CompletedResponse, ConversationMessage, ModelId, ProviderError, ProviderErrorKind,
         ProviderId, RequestId, SelectedContext, StreamEvent, TextGenerationRequest,
     },
-    providers::{StreamSink, TextGenerationRouter},
+    provider_settings::ProviderSettingsStore,
+    providers::{ProviderRouter, StreamSink, TextGenerationRouter},
+    secrets::SecretStore,
 };
 
 const MAX_MANUAL_TEXT_BYTES: usize = 16 * 1024;
@@ -40,6 +42,25 @@ struct ConfiguredRuntime {
     context_pack_directory: PathBuf,
     context_pack_id: String,
     router: Arc<dyn TextGenerationRouter>,
+    provider_settings: Option<Arc<ProviderSettingsStore>>,
+    secret_store: Option<Arc<dyn SecretStore>>,
+}
+
+impl ConfiguredRuntime {
+    fn current_router(&self) -> Result<Arc<dyn TextGenerationRouter>, ProviderError> {
+        let (Some(settings), Some(secrets)) = (&self.provider_settings, &self.secret_store) else {
+            return Ok(Arc::clone(&self.router));
+        };
+        let config = settings.app_config().map_err(|_| ProviderError {
+            kind: ProviderErrorKind::Configuration,
+            message: "Provider settings are invalid or unavailable".to_owned(),
+        })?;
+        Ok(Arc::new(ProviderRouter::new(
+            config,
+            Arc::clone(secrets),
+            reqwest::Client::new(),
+        )))
+    }
 }
 
 struct SessionState {
@@ -80,6 +101,27 @@ impl SessionService {
             context_pack_directory,
             context_pack_id,
             router,
+            provider_settings: None,
+            secret_store: None,
+        }))
+    }
+
+    #[must_use]
+    pub fn configured_with_provider_settings(
+        context_pack_root: PathBuf,
+        context_pack_directory: PathBuf,
+        context_pack_id: String,
+        router: Arc<dyn TextGenerationRouter>,
+        provider_settings: Arc<ProviderSettingsStore>,
+        secret_store: Arc<dyn SecretStore>,
+    ) -> Self {
+        Self::new(SessionRuntime::Configured(ConfiguredRuntime {
+            context_pack_root,
+            context_pack_directory,
+            context_pack_id,
+            router,
+            provider_settings: Some(provider_settings),
+            secret_store: Some(secret_store),
         }))
     }
 
@@ -110,7 +152,15 @@ impl SessionService {
                 };
             }
         };
-        if let Err(error) = runtime.router.check_readiness() {
+        let router = match runtime.current_router() {
+            Ok(router) => router,
+            Err(error) => {
+                return ManualAssistanceReadiness::Unconfigured {
+                    message: error.message,
+                };
+            }
+        };
+        if let Err(error) = router.check_readiness() {
             return ManualAssistanceReadiness::Unconfigured {
                 message: error.message,
             };
@@ -135,8 +185,8 @@ impl SessionService {
             };
         }
         ManualAssistanceReadiness::Ready {
-            provider: runtime.router.provider(),
-            model: runtime.router.model().clone(),
+            provider: router.provider(),
+            model: router.model().clone(),
             context_pack: runtime.context_pack_id.clone(),
         }
     }
@@ -202,20 +252,26 @@ impl SessionService {
         requires_prior_intent: bool,
         sink: Arc<dyn StreamSink>,
     ) -> Result<RequestId, ManualAssistanceError> {
-        let runtime = match &self.runtime {
-            SessionRuntime::Configured(runtime) => runtime,
+        let mut runtime = match &self.runtime {
+            SessionRuntime::Configured(runtime) => runtime.clone(),
             SessionRuntime::Unconfigured { message } => {
                 return Err(ManualAssistanceError::NotConfigured {
                     message: message.clone(),
                 });
             }
         };
-        runtime
-            .router
+        let router =
+            runtime
+                .current_router()
+                .map_err(|error| ManualAssistanceError::NotConfigured {
+                    message: error.message,
+                })?;
+        router
             .check_readiness()
             .map_err(|error| ManualAssistanceError::NotConfigured {
                 message: error.message,
             })?;
+        runtime.router = router;
 
         let request_id = RequestId::new();
         let cancellation = CancellationToken::new();
@@ -226,7 +282,6 @@ impl SessionService {
         }
 
         let service = Arc::clone(self);
-        let runtime = runtime.clone();
         tokio::spawn(async move {
             let result = service
                 .process_request(

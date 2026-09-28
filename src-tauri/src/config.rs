@@ -38,12 +38,7 @@ impl AppConfig {
     /// Returns a typed error when a required setting is absent or invalid.
     pub fn from_source(source: &impl ConfigSource) -> Result<Self, ConfigError> {
         let provider_value = required(source, "SINGULARITY_LIVE_PROVIDER")?;
-        let provider = match provider_value.as_str() {
-            "openrouter" => ProviderId::OpenRouter,
-            "openai" => ProviderId::OpenAi,
-            "gemini" => ProviderId::Gemini,
-            _ => return Err(ConfigError::UnsupportedProvider),
-        };
+        let provider = parse_provider(&provider_value)?;
 
         let model_value = required(source, "SINGULARITY_LIVE_MODEL")?;
         let model = ModelId::new(model_value).map_err(ConfigError::InvalidModel)?;
@@ -51,6 +46,29 @@ impl AppConfig {
         validate_context_pack_id(&context_pack)?;
         let request_timeout = parse_timeout(source)?;
 
+        Ok(Self {
+            provider,
+            model,
+            context_pack,
+            request_timeout,
+        })
+    }
+
+    /// Builds runtime configuration from the persisted desktop profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error when a profile field or request timeout is invalid.
+    pub fn from_settings(
+        provider: &str,
+        model: String,
+        context_pack: String,
+        source: &impl ConfigSource,
+    ) -> Result<Self, ConfigError> {
+        let provider = parse_provider(provider)?;
+        let model = ModelId::new(model).map_err(ConfigError::InvalidModel)?;
+        validate_context_pack_id(&context_pack)?;
+        let request_timeout = parse_timeout(source)?;
         Ok(Self {
             provider,
             model,
@@ -77,6 +95,15 @@ impl AppConfig {
     #[must_use]
     pub const fn request_timeout(&self) -> Duration {
         self.request_timeout
+    }
+}
+
+fn parse_provider(value: &str) -> Result<ProviderId, ConfigError> {
+    match value {
+        "openrouter" | "open_router" => Ok(ProviderId::OpenRouter),
+        "openai" | "open_ai" => Ok(ProviderId::OpenAi),
+        "gemini" => Ok(ProviderId::Gemini),
+        _ => Err(ConfigError::UnsupportedProvider),
     }
 }
 
