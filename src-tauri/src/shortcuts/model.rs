@@ -42,6 +42,8 @@ pub enum ShortcutAction {
     #[serde(alias = "toggle_window")]
     ToggleTaskbarIcon,
     VoiceInput,
+    ToggleAudioSource,
+    ToggleClickThrough,
     QuickSend,
     MinMode,
 }
@@ -254,6 +256,8 @@ impl ShortcutBindings {
                 }),
             ),
             ShortcutBinding::new(ShortcutAction::VoiceInput, None),
+            ShortcutBinding::new(ShortcutAction::ToggleAudioSource, None),
+            ShortcutBinding::new(ShortcutAction::ToggleClickThrough, None),
             ShortcutBinding::new(ShortcutAction::QuickSend, None),
             ShortcutBinding::new(ShortcutAction::MinMode, None),
         ]

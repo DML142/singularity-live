@@ -11,6 +11,7 @@ use crate::capture::CaptureTargetKind;
 
 const CONFIG_VERSION: u32 = 2;
 pub const DEFAULT_WINDOW_OPACITY: u8 = 100;
+pub const DEFAULT_APP_SCALE: u8 = 100;
 
 #[derive(Clone)]
 pub struct CustomizationService {
@@ -22,6 +23,8 @@ pub struct CustomizationService {
 struct CustomizationConfig {
     version: u32,
     window_opacity: u8,
+    #[serde(default = "default_app_scale")]
+    app_scale: u8,
     #[serde(default)]
     close_window_on_screenshot: bool,
     #[serde(default = "default_capture_target_kind")]
@@ -70,6 +73,28 @@ impl CustomizationService {
         Ok(opacity)
     }
 
+    /// Reads the persisted application zoom percentage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an existing settings file is inaccessible or invalid.
+    pub fn app_scale(&self) -> Result<u8, String> {
+        Ok(self.load_config()?.app_scale)
+    }
+
+    /// Atomically stores a supported application zoom percentage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the value is unsupported or the settings file cannot be saved.
+    pub fn set_app_scale(&self, percentage: u8) -> Result<u8, String> {
+        validate_app_scale(percentage)?;
+        let mut config = self.load_config()?;
+        config.app_scale = percentage;
+        self.save_config(config)?;
+        Ok(percentage)
+    }
+
     /// Reads screenshot lifecycle and capture-target preferences.
     ///
     /// # Errors
@@ -112,6 +137,7 @@ impl CustomizationService {
             .map_err(|_| "Customization settings are invalid".to_owned())?;
         if !matches!(config.version, 1 | CONFIG_VERSION)
             || validate_window_opacity(config.window_opacity).is_err()
+            || validate_app_scale(config.app_scale).is_err()
         {
             return Err("Customization settings are invalid".to_owned());
         }
@@ -134,9 +160,14 @@ fn default_config() -> CustomizationConfig {
     CustomizationConfig {
         version: CONFIG_VERSION,
         window_opacity: DEFAULT_WINDOW_OPACITY,
+        app_scale: DEFAULT_APP_SCALE,
         close_window_on_screenshot: false,
         screenshot_target_kind: default_capture_target_kind(),
     }
+}
+
+fn default_app_scale() -> u8 {
+    DEFAULT_APP_SCALE
 }
 
 fn default_capture_target_kind() -> CaptureTargetKind {
@@ -148,6 +179,14 @@ fn validate_window_opacity(opacity: u8) -> Result<(), String> {
         Ok(())
     } else {
         Err("Window opacity must be between 40 and 100 percent".to_owned())
+    }
+}
+
+fn validate_app_scale(percentage: u8) -> Result<(), String> {
+    if (70..=130).contains(&percentage) && percentage.is_multiple_of(10) {
+        Ok(())
+    } else {
+        Err("Application scale must be between 70 and 130 percent".to_owned())
     }
 }
 
@@ -167,7 +206,7 @@ fn replace_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CustomizationService, DEFAULT_WINDOW_OPACITY};
+    use super::{CustomizationService, DEFAULT_APP_SCALE, DEFAULT_WINDOW_OPACITY};
 
     #[test]
     fn uses_full_opacity_when_no_customization_file_exists() {
@@ -194,5 +233,42 @@ mod tests {
         assert!(settings.set_window_opacity(39).is_err());
         assert!(settings.set_window_opacity(63).is_err());
         assert!(settings.set_window_opacity(101).is_err());
+    }
+
+    #[test]
+    fn saves_and_loads_supported_application_scale_steps() {
+        let directory = tempfile::tempdir().expect("temporary settings directory");
+        let path = directory.path().join("customization.json");
+        let settings = CustomizationService::new(&path);
+
+        assert_eq!(settings.app_scale(), Ok(DEFAULT_APP_SCALE));
+        assert_eq!(settings.set_app_scale(110), Ok(110));
+        assert_eq!(CustomizationService::new(path).app_scale(), Ok(110));
+    }
+
+    #[test]
+    fn defaults_scale_when_loading_an_existing_customization_file() {
+        let directory = tempfile::tempdir().expect("temporary settings directory");
+        let path = directory.path().join("customization.json");
+        std::fs::write(
+            &path,
+            br#"{"version":2,"window_opacity":85,"close_window_on_screenshot":true,"screenshot_target_kind":"window"}"#,
+        )
+        .expect("existing customization settings written");
+
+        assert_eq!(
+            CustomizationService::new(path).app_scale(),
+            Ok(DEFAULT_APP_SCALE)
+        );
+    }
+
+    #[test]
+    fn rejects_application_scale_values_outside_the_supported_steps() {
+        let directory = tempfile::tempdir().expect("temporary settings directory");
+        let settings = CustomizationService::new(directory.path().join("customization.json"));
+
+        assert!(settings.set_app_scale(69).is_err());
+        assert!(settings.set_app_scale(95).is_err());
+        assert!(settings.set_app_scale(140).is_err());
     }
 }

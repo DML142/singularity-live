@@ -56,6 +56,8 @@ pub fn run() {
             commands::application_status::get_app_status,
             commands::customization::get_window_opacity,
             commands::customization::set_window_opacity,
+            commands::customization::get_app_scale,
+            commands::customization::set_app_scale,
             commands::customization::get_screenshot_preferences,
             commands::customization::set_screenshot_preferences,
             commands::manual_assistance::get_manual_assistance_readiness,
@@ -126,6 +128,9 @@ fn setup_application(
         .get_webview_window("main")
         .ok_or_else(|| std::io::Error::other("The main application window is unavailable"))?;
     window.set_always_on_top(true)?;
+    if let Ok(scale) = customization.app_scale() {
+        let _ = window.set_zoom(f64::from(scale) / 100.0);
+    }
     build_system_tray(application)?;
     let manual_session = Arc::clone(&service);
     let close_preferences = Arc::clone(&customization);
@@ -179,9 +184,12 @@ fn setup_shortcuts(
         );
     let shortcut_coordinator = Arc::clone(coordinator);
     let shortcut_voice_input = Arc::clone(voice_input);
+    let shortcut_voice_source = Arc::clone(voice_input);
     let shortcut_application = application.handle().clone();
     let taskbar_icon_hidden = Arc::new(std::sync::Mutex::new(false));
     let shortcut_taskbar_icon_hidden = Arc::clone(&taskbar_icon_hidden);
+    let click_through_enabled = Arc::new(std::sync::Mutex::new(false));
+    let shortcut_click_through_enabled = Arc::clone(&click_through_enabled);
     let activation = Arc::new(move |action| match action {
         ShortcutAction::Screenshot => {
             let coordinator = Arc::clone(&shortcut_coordinator);
@@ -200,6 +208,22 @@ fn setup_shortcuts(
             tauri::async_runtime::spawn(async move {
                 voice_input.toggle().await;
             });
+        }
+        ShortcutAction::ToggleAudioSource => {
+            let voice_input = Arc::clone(&shortcut_voice_source);
+            tauri::async_runtime::spawn(async move {
+                let _ = voice_input.toggle_source().await;
+            });
+        }
+        ShortcutAction::ToggleClickThrough => {
+            if let Some(window) = shortcut_application.get_webview_window("main")
+                && let Ok(mut enabled) = shortcut_click_through_enabled.lock()
+            {
+                let next_enabled = !*enabled;
+                if window.set_ignore_cursor_events(next_enabled).is_ok() {
+                    *enabled = next_enabled;
+                }
+            }
         }
         ShortcutAction::QuickSend => {
             let _ = shortcut_application.emit("singularity:quick-send", ());

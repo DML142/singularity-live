@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import {
+  APP_SCALE_STEP,
+  DEFAULT_APP_SCALE,
   DEFAULT_WINDOW_OPACITY,
+  MAX_APP_SCALE,
+  MIN_APP_SCALE,
+  getAppScale,
   getScreenshotPreferences,
   getWindowOpacity,
+  setAppScale,
   setScreenshotPreferences,
   setWindowOpacity,
   type ScreenshotPreferences,
@@ -151,10 +157,10 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
           </h2>
           <p className="settings-description">
             {activeTab === "binds"
-              ? "Configure capture, screenshot send, hide/show, voice input, and quick-send shortcuts."
+              ? "Configure capture, audio-source, click-through, voice-input, and send shortcuts."
               : activeTab === "audio"
                 ? "Choose the microphone or system audio source used by voice transcription."
-                : "Adjust how much of your desktop shows through the assistant window."}
+                : "Adjust window appearance, app scale, and screenshot capture settings."}
           </p>
         </div>
         <button className="settings-back-button" type="button" onClick={onBack}>
@@ -265,6 +271,8 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                           event.currentTarget.value === "screenshot_send" ||
                           event.currentTarget.value === "toggle_taskbar_icon" ||
                           event.currentTarget.value === "voice_input" ||
+                          event.currentTarget.value === "toggle_audio_source" ||
+                          event.currentTarget.value === "toggle_click_through" ||
                           event.currentTarget.value === "quick_send" ||
                           event.currentTarget.value === "min_mode"
                         ) {
@@ -279,6 +287,12 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                       </option>
                       <option value="voice_input">
                         Voice input · toggle recording
+                      </option>
+                      <option value="toggle_audio_source">
+                        Swap microphone / system audio
+                      </option>
+                      <option value="toggle_click_through">
+                        Toggle mouse click-through
                       </option>
                       <option value="quick_send">Send current message</option>
                       <option value="min_mode">Toggle minmode</option>
@@ -458,6 +472,11 @@ function AudioSettings() {
 }
 
 function CustomizationSettings() {
+  const [appScale, setAppScaleState] = useState(DEFAULT_APP_SCALE);
+  const [savedAppScale, setSavedAppScale] = useState(DEFAULT_APP_SCALE);
+  const [loadingAppScale, setLoadingAppScale] = useState(true);
+  const [savingAppScale, setSavingAppScale] = useState(false);
+  const [appScaleError, setAppScaleError] = useState<string | null>(null);
   const [opacity, setOpacity] = useState(DEFAULT_WINDOW_OPACITY);
   const [savedOpacity, setSavedOpacity] = useState(DEFAULT_WINDOW_OPACITY);
   const [loadingOpacity, setLoadingOpacity] = useState(true);
@@ -478,6 +497,30 @@ function CustomizationSettings() {
   const setScreenshotTargetKind = useScreenAssistanceStore(
     (state) => state.setTargetKind,
   );
+
+  useEffect(() => {
+    let active = true;
+    void getAppScale()
+      .then((value) => {
+        if (active) {
+          setAppScaleState(value);
+          setSavedAppScale(value);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAppScaleError("Application scale settings could not be loaded");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingAppScale(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -567,6 +610,21 @@ function CustomizationSettings() {
     }
   }
 
+  async function saveAppScale(): Promise<void> {
+    setSavingAppScale(true);
+    setAppScaleError(null);
+    try {
+      const saved = await setAppScale(appScale);
+      setAppScaleState(saved);
+      setSavedAppScale(saved);
+    } catch {
+      setAppScaleError("Application scale settings could not be saved");
+      setAppScaleState(savedAppScale);
+    } finally {
+      setSavingAppScale(false);
+    }
+  }
+
   return (
     <div
       id="settings-panel-customization"
@@ -616,6 +674,49 @@ function CustomizationSettings() {
             disabled={loadingOpacity || savingOpacity || opacity === savedOpacity}
           >
             {savingOpacity ? "Saving…" : "Save appearance"}
+          </button>
+        </footer>
+      </section>
+      <section className="customization-card" aria-labelledby="app-scale-heading">
+        <div>
+          <h3 id="app-scale-heading">Application scale</h3>
+          <p className="settings-description">
+            Change the size of the app content, like browser zoom.
+          </p>
+        </div>
+        <label className="opacity-control" htmlFor="app-scale">
+          <span>Scale</span>
+          <output htmlFor="app-scale">{appScale}%</output>
+          <input
+            id="app-scale"
+            type="range"
+            min={MIN_APP_SCALE}
+            max={MAX_APP_SCALE}
+            step={APP_SCALE_STEP}
+            value={appScale}
+            disabled={loadingAppScale || savingAppScale}
+            onChange={(event) => {
+              setAppScaleState(Number(event.currentTarget.value));
+            }}
+          />
+          <span className="opacity-range-labels">
+            <span>Smaller</span>
+            <span>Larger</span>
+          </span>
+        </label>
+        {appScaleError !== null ? (
+          <p className="settings-error" role="alert">
+            {appScaleError}
+          </p>
+        ) : null}
+        <footer className="settings-footer">
+          <button
+            className="settings-save-button"
+            type="button"
+            onClick={() => void saveAppScale()}
+            disabled={loadingAppScale || savingAppScale || appScale === savedAppScale}
+          >
+            {savingAppScale ? "Saving…" : "Save scale"}
           </button>
         </footer>
       </section>

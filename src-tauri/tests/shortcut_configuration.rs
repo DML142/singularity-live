@@ -17,7 +17,7 @@ fn defaults_to_capture_send_visibility_voice_and_quick_send_bindings() {
     let windows = ShortcutBindings::defaults(ShortcutPlatform::Windows);
     let macos = ShortcutBindings::defaults(ShortcutPlatform::MacOS);
 
-    assert_eq!(windows.len(), 6);
+    assert_eq!(windows.len(), 8);
     assert_eq!(windows[0].action, ShortcutAction::Screenshot);
     assert_eq!(
         windows[0].chord.as_ref().map(ShortcutChord::canonical),
@@ -39,10 +39,14 @@ fn defaults_to_capture_send_visibility_voice_and_quick_send_bindings() {
     );
     assert_eq!(windows[3].action, ShortcutAction::VoiceInput);
     assert!(windows[3].chord.is_none());
-    assert_eq!(windows[4].action, ShortcutAction::QuickSend);
+    assert_eq!(windows[4].action, ShortcutAction::ToggleAudioSource);
     assert!(windows[4].chord.is_none());
-    assert_eq!(windows[5].action, ShortcutAction::MinMode);
+    assert_eq!(windows[5].action, ShortcutAction::ToggleClickThrough);
     assert!(windows[5].chord.is_none());
+    assert_eq!(windows[6].action, ShortcutAction::QuickSend);
+    assert!(windows[6].chord.is_none());
+    assert_eq!(windows[7].action, ShortcutAction::MinMode);
+    assert!(windows[7].chord.is_none());
 }
 
 #[test]
@@ -70,7 +74,7 @@ fn migrates_older_shortcut_files_and_persists_only_new_actions() {
 
     let loaded = store.load().expect("older config is migrated");
 
-    assert_eq!(loaded.len(), 6);
+    assert_eq!(loaded.len(), 8);
     assert_eq!(loaded[0].action, ShortcutAction::Screenshot);
     assert_eq!(loaded[0].chord, previous_capture_chord);
     assert!(
@@ -86,9 +90,9 @@ fn migrates_older_shortcut_files_and_persists_only_new_actions() {
     let persisted: serde_json::Value =
         serde_json::from_slice(&fs::read(&path).expect("migrated config is persisted"))
             .expect("migrated config is valid JSON");
-    assert_eq!(persisted["version"], 4);
+    assert_eq!(persisted["version"], 5);
     assert_eq!(
-        store.load().expect("version 4 config remains stable"),
+        store.load().expect("version 5 config remains stable"),
         loaded
     );
 }
@@ -146,7 +150,7 @@ fn migrates_the_previous_window_toggle_action_to_the_taskbar_icon_action() {
     let persisted: serde_json::Value =
         serde_json::from_slice(&fs::read(&path).expect("read migrated config"))
             .expect("migrated config is valid JSON");
-    assert_eq!(persisted["version"], 4);
+    assert_eq!(persisted["version"], 5);
     assert!(
         persisted["bindings"]
             .as_array()
@@ -234,7 +238,7 @@ fn persists_versioned_bindings_and_uses_defaults_when_the_file_is_missing() {
     let store = ShortcutConfigStore::new(&path, ShortcutPlatform::Windows);
 
     let defaults = store.load().expect("missing file uses defaults");
-    assert_eq!(defaults.len(), 6);
+    assert_eq!(defaults.len(), 8);
     store.save(&defaults).expect("save bindings");
     assert_eq!(store.load().expect("load saved bindings"), defaults);
     assert_eq!(
@@ -242,7 +246,7 @@ fn persists_versioned_bindings_and_uses_defaults_when_the_file_is_missing() {
             &std::fs::read(path).expect("read saved config")
         )
         .expect("valid JSON")["version"],
-        4
+        5
     );
 }
 
@@ -254,7 +258,7 @@ fn rejects_malformed_and_unsupported_versioned_configuration() {
 
     std::fs::write(&path, b"not json").expect("write malformed config");
     assert!(store.load().is_err());
-    std::fs::write(&path, br#"{"version": 5, "bindings": []}"#).expect("write unsupported version");
+    std::fs::write(&path, br#"{"version": 6, "bindings": []}"#).expect("write unsupported version");
     assert!(store.load().is_err());
 }
 

@@ -23,6 +23,8 @@ fn main() {
         "stop_voice_input",
         "get_window_opacity",
         "set_window_opacity",
+        "get_app_scale",
+        "set_app_scale",
         "get_screenshot_preferences",
         "set_screenshot_preferences",
     ]);

@@ -135,7 +135,8 @@ React owns:
   the composer, compact live transcription there, and composer insertion after stop;
 - global quick-send activation that submits the current composer draft while the window is
   minimized without restoring it;
-- a persisted window-opacity preference exposed through Settings → Customization;
+- persisted window-opacity and application-scale preferences exposed through Settings →
+  Customization;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -157,7 +158,8 @@ Rust owns:
 - microphone, system-audio loopback, and screen capture;
 - persistence and context loading, including Rust-owned customization settings;
 - image preprocessing, microphone enumeration, versioned audio, shortcut, and customization
-  settings, native shortcut registration, system tray and taskbar-icon visibility lifecycle,
+  settings, native shortcut registration, click-through toggling, application zoom, system tray
+  and taskbar-icon visibility lifecycle,
   cursor-to-screen/window resolution, and optional capture-window lifecycle;
 - safe error mapping and structured technical logging.
 
@@ -166,9 +168,10 @@ commands for capability reporting, target listing, explicit capture, capture can
 crop, discard, screenshot-assisted requests, and screenshot preferences, plus voice commands for persisted source
 selection, active microphone enumeration, explicit start/stop, and `get_voice_input_settings`.
 It also exposes typed `get_shortcut_bindings`, `update_shortcut_bindings`, `get_window_opacity`,
-`set_window_opacity`, `get_screenshot_preferences`, and `set_screenshot_preferences`
-commands. The native shortcut callback dispatches Screenshot, Voice input, and taskbar-icon
-visibility directly in Rust and emits minmode, quick-send, and screenshot-send events for the
+`set_window_opacity`, `get_app_scale`, `set_app_scale`, `get_screenshot_preferences`, and
+`set_screenshot_preferences` commands. The native shortcut callback dispatches screenshot,
+voice-input, audio-source, click-through, and taskbar-icon actions in Rust and emits minmode,
+quick-send, and screenshot-send events for the
 mounted composer; send actions do not restore a minimized window. A system-tray icon with
 Show/Hide/Quit keeps the window reachable while hidden; the operating system chooses whether to
 place the icon in the notification area or its overflow. `SessionService` validates text, selects
@@ -195,8 +198,8 @@ the main window receives application and manual-assistance permissions, the scre
 `start_screenshot_assistance`, and the shortcut settings
 commands `get_shortcut_bindings` and `update_shortcut_bindings`, plus `set_voice_input_source`,
 `list_audio_input_devices`, `get_voice_input_settings`, `start_voice_input`, `stop_voice_input`,
-`get_window_opacity`, `set_window_opacity`, `get_screenshot_preferences`, and
-`set_screenshot_preferences`. It also receives
+`get_window_opacity`, `set_window_opacity`, `get_app_scale`, `set_app_scale`,
+`get_screenshot_preferences`, and `set_screenshot_preferences`. It also receives
 `core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
 permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
 logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
@@ -653,8 +656,8 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 - Rust-only platform capture adapters, bounded image preparation, a five-minute transient
   image store, request-scoped image parts through the provider-neutral router, and OpenRouter
   and Gemini image mappings that preserve text-only request compatibility.
-- Versioned screenshot, screenshot-send, taskbar-icon toggle, voice-input, quick-send, and
-  minmode bindings,
+- Versioned screenshot, screenshot-send, taskbar-icon toggle, voice-input, audio-source toggle,
+  click-through toggle, quick-send, and minmode bindings,
   transactional native shortcut registration and Wayland portal integration,
   monitor/window-under-pointer capture coordination, an always-on-top window lifecycle, system tray,
   and Settings → Binds.
@@ -664,11 +667,13 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 - A full-width chat layout without the Session sidebar or separate Transcript panel, screenshot
   messages and crop controls in the conversation, selectable context prefixes, a composer
   Record/Stop button, and Settings → Audio and Customization
-  with a Rust-persisted, adjustable app-window opacity.
+  with Rust-persisted, adjustable app-window opacity and application zoom.
 - Direct OpenAI GPT-6 Luna text and screenshot streaming alongside the OpenRouter and Gemini
   adapters; OpenAI, Soniox, Gemini, and OpenRouter keys stay in the desktop environment.
 - A minmode bind that hides app chrome while keeping the conversation and composer visible.
 - Rust-persisted screenshot source selection and the optional “Close window on screenshot” setting.
+- Global shortcuts that swap the saved microphone/system-audio source and toggle mouse
+  click-through; Rust-persisted webview zoom from 70% to 130% in 10% steps.
 - Windows-specific Tauri `contentProtected` configuration for the main window. Its behavior
   with real OBS display and window capture still needs manual smoke validation.
 - A development-only interactive/argument launcher with numbered workflow, model, and
@@ -781,6 +786,18 @@ stored in the Rust-owned customization file.
 | Real microphone selection and Soniox transcription  | Not run; requires a live Windows audio device and the user's Soniox API key                                                               |
 | Minimized quick-send and global shortcut activation | Not run in the native desktop window                                                                                                      |
 | Windows transparency and capture protection         | Configured; visual transparency and OBS capture smoke checks remain pending                                                               |
+
+### Audio-source shortcut and application-scale validation
+
+The audio-source bind updates the Rust-persisted choice and the Settings store. Click-through
+uses a separate process-state shortcut action, and application zoom is stored and applied by
+the native webview. The automated run uses local settings and shortcut fixtures; it does not
+exercise a live desktop, audio device, or provider.
+
+| Check                                          | Result                                                                                                                |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Full project `pnpm check`                      | Passed on 2026-09-28: 61 frontend tests, 130 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check |
+| Native shortcut, click-through, and zoom smoke | Not run in the native desktop window                                                                                  |
 
 ### Screen assistance validation record
 

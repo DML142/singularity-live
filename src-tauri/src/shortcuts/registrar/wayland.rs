@@ -298,6 +298,8 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
                     ShortcutAction::ScreenshotSend => "Send the captured screenshot",
                     ShortcutAction::ToggleTaskbarIcon => "Show or hide the taskbar icon",
                     ShortcutAction::VoiceInput => "Toggle voice input",
+                    ShortcutAction::ToggleAudioSource => "Switch microphone or system audio",
+                    ShortcutAction::ToggleClickThrough => "Toggle mouse click-through",
                     ShortcutAction::QuickSend => "Send the current assistant message",
                     ShortcutAction::MinMode => "Toggle minimal chat mode",
                 };

@@ -489,6 +489,8 @@ button:focus-visible {
   padding-top: 20px;
 }
 .customization-panel {
+  display: grid;
+  gap: 18px;
   max-width: 720px;
 }
 .customization-card {

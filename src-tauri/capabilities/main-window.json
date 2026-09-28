@@ -22,6 +22,8 @@
     "allow-update-shortcut-bindings",
     "allow-get-window-opacity",
     "allow-set-window-opacity",
+    "allow-get-app-scale",
+    "allow-set-app-scale",
     "allow-get-screenshot-preferences",
     "allow-set-screenshot-preferences",
     "allow-set-voice-input-source",
