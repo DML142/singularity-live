@@ -12,10 +12,9 @@ It helps a creator reason about code and images, develop an idea while recording
 to speech from the creator or a co-host. The creator sees the assistant; the audience should
 not see its window in the creator's broadcast or recording.
 
-The core interaction accepts typed text, an explicitly selected screenshot, and (when the
-planned voice-input workflow is implemented) explicitly captured microphone or system audio
-converted to text. The assistant returns text only. Voice input is a way to provide context,
-not a request for spoken AI replies.
+The core interaction accepts typed text, an explicitly selected screenshot, and explicitly
+captured microphone or Windows system audio converted to text. The assistant returns text
+only. Voice input is a way to provide context, not a request for spoken AI replies.
 
 Keeping the assistant window out of supported screen-capture output while leaving it visible
 and usable to the creator is a required product capability and release gate. It is distinct
@@ -87,7 +86,7 @@ flowchart LR
 The assistant window must also be excluded from supported broadcast/recording captures while
 remaining visible on the creator's desktop. Voice transcripts are reviewed or edited in the
 composer and sent only after the creator acts. Audio never produces spoken assistant output.
-Audio input and broadcast capture protection are not implemented in Phase 0.
+Live desktop verification is still pending.
 
 ## 5. Architecture
 
@@ -109,13 +108,13 @@ and delegate; they do not contain business logic. Infrastructure adapters know t
 external APIs. Domain types do not know React, individual providers, SQLite, xcap, or
 WASAPI.
 
-The current vertical slice contains application status, manual text assistance, and explicit
-screen assistance. Requests pass through narrow Tauri commands to Rust services. The session
-service loads selected context and sends bounded role-tagged conversation history through the
-configured provider-independent router; a screenshot request adds one temporary image to
-that request. One process-local session keeps successful text turns and a rolling summary
-until reset or application restart. Future directories are created when code exists for
-them.
+The current vertical slice contains application status, manual text assistance, explicit
+screen assistance, and transient voice transcription. Requests pass through narrow Tauri
+commands to Rust services. The session service loads selected context and sends bounded
+role-tagged conversation history through the configured provider-independent router; a
+screenshot request adds one temporary image to that request. One process-local session keeps
+successful text turns and a rolling summary until reset or application restart. Voice input
+remains outside session history until the creator edits and explicitly submits its transcript.
 
 ## 6. Frontend responsibilities
 
@@ -129,6 +128,7 @@ React owns:
   capture, temporary preview/crop, and separate send or discard actions;
 - explicit shortcut-binding edits and chord recording, plus hotkey-capture preview/error
   presentation;
+- voice-source selection, live transcript presentation, and composer insertion after stop;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -144,19 +144,21 @@ Rust owns:
 
 - application services and session orchestration;
 - provider communication and routing;
+- Soniox WebSocket transcription and local voice activity filtering;
 - credential lookup behind the Rust `SecretStore` port;
 - filesystem and platform paths;
-- audio and screen capture;
+- microphone, system-audio loopback, and screen capture;
 - persistence and context loading;
 - image preprocessing, versioned shortcut settings, native shortcut registration,
   cursor-to-monitor resolution, and capture-window lifecycle;
 - safe error mapping and structured technical logging.
 
-Rust exposes `get_app_status`, the manual-assistance commands, and narrow screen-assistance
+Rust exposes `get_app_status`, the manual-assistance commands, narrow screen-assistance
 commands for capability reporting, target listing, explicit capture, capture cancellation,
-crop, discard, and screenshot-assisted requests. It also exposes typed
-`get_shortcut_bindings` and `update_shortcut_bindings` commands; the global shortcut callback
-is native-only and unavailable to the webview. `SessionService` validates text, selects
+crop, discard, and screenshot-assisted requests, and voice commands for source selection and
+explicit start/stop. It also exposes typed `get_shortcut_bindings` and
+`update_shortcut_bindings` commands; the global shortcut callback is native-only and
+unavailable to the webview. `SessionService` validates text, selects
 relevant static context, composes bounded system and role-tagged conversation messages,
 summarizes older completed turns through the existing router when limits require it, permits
 one active request, and returns typed failures. Capture, image processing, provider
@@ -177,7 +179,8 @@ the main window receives application and manual-assistance permissions, the scre
 `get_screen_capture_capabilities`, `list_screen_capture_targets`,
 `start_screen_capture`, `cancel_screen_capture`, `crop_screen_capture`,
 `discard_screen_capture`, and `start_screenshot_assistance`, and the shortcut settings
-commands `get_shortcut_bindings` and `update_shortcut_bindings`. It also receives
+commands `get_shortcut_bindings` and `update_shortcut_bindings`, plus `set_voice_input_source`,
+`start_voice_input`, and `stop_voice_input`. It also receives
 `core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
 permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
 logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
@@ -188,17 +191,19 @@ audio, screenshots, full context packs, and full provider payloads must not be l
 
 ## 9. Provider architecture
 
-Planned capability ports include speech-to-text. Text generation has direct OpenRouter and
-Gemini adapters; both support provider-neutral still image parts for explicit screenshot
-requests. Provider choice is an infrastructure setting, not a domain dependency.
+Text generation has direct OpenAI, Gemini, and OpenRouter adapters. Each accepts the same
+provider-neutral text and request-scoped PNG image parts. The selected default profile is
+`gpt-6-luna` for text, screenshots, code, and explanations. Gemini and OpenRouter remain
+selectable alternatives. Provider choice is an infrastructure setting, not a domain
+dependency.
 
-The selected initial models are `gemini-3.5-transcribe-live` for planned transcript-only
-live speech recognition and `gemini-3.8-flash` for text, image, code, and explanation
-requests. Gemini text and image generation is implemented through a direct Rust adapter;
-live requests with the user's key have not yet been verified in this change. Speech
-recognition remains planned, not implemented. Evaluate Russian/Ukrainian technical
+Soniox `stt-rt-v5` supplies streaming speech-to-text independently from text generation. Its
+Rust WebSocket adapter sends Russian, Ukrainian, and English language hints and technical
+terms, then emits a live transcript. User API keys are read from the desktop process
+environment and remain inside Rust. Automated checks use mocks; live OpenAI/Soniox requests
+and real audio-device checks have not been verified yet. Evaluate Russian/Ukrainian technical
 transcripts, screenshot interpretation, code correctness, latency, and cost before calling
-either path production-ready. OpenRouter remains available as an alternative text provider.
+either path production-ready.
 
 ```mermaid
 flowchart LR
@@ -208,8 +213,8 @@ flowchart LR
   Adapter --> Vendor[External provider]
 ```
 
-The router selects OpenRouter or Gemini from typed startup configuration and enforces the
-configured model and provider-stream timeout. It supports cancellation and classifies
+The router selects OpenAI, OpenRouter, or Gemini from typed startup configuration and enforces
+the configured model and provider-stream timeout. It supports cancellation and classifies
 authentication, configuration, invalid-request, rate-limit, timeout, transport, provider,
 cancellation, and malformed-response failures. It does not retry or fall back. Provider DTOs, endpoints,
 authorization headers, and SSE parsing stay inside the adapter. Prompt construction is
@@ -239,8 +244,8 @@ prior successful user and assistant messages in chronological order and automati
 compacts older turns into a rolling summary when recent history exceeds either bound. A
 screenshot follow-up selects static context using the most recent text intent, includes prior
 role-tagged messages, and sends the current image only in that request. Completed history and
-rolling summaries retain text only. Audio, transcript, and other unsupported inputs do not
-enter the session.
+rolling summaries retain text only. Captured audio is not part of session history; a transcript
+enters through the same editable text composer and explicit send action as typed text.
 
 ## 11. Session architecture
 
@@ -263,11 +268,10 @@ succeeds. Context pack loading runs on a blocking worker; provider and summary c
 request cancellation.
 
 The session is deliberately volatile and has no event or chat-history persistence. It does
-not introduce multiple chats, SQLite, audio inputs, transcription, or response modes. A
-single explicitly submitted screenshot may accompany one provider request and is deleted
-afterward; images do not enter session history. Future session event records may use stable
-IDs, timestamps, source, and kind, but a durable event log is not part of the current
-implementation.
+not introduce multiple chats, SQLite, persistent audio inputs, or response modes. A single
+explicitly submitted screenshot may accompany one provider request and is deleted afterward;
+images do not enter session history. Future session event records may use stable IDs,
+timestamps, source, and kind, but a durable event log is not part of the current implementation.
 
 ## 12. Storage plan
 
@@ -280,25 +284,24 @@ The SQLite library and migration approach will be chosen in Phase 5 and recorded
 ADR. No database crate or durable runtime storage exists; the implemented manual-text
 session remains volatile and in memory.
 
-## 13. Audio plan
+## 13. Audio and transcription
 
-The planned flow is `AudioSource → normalizer → local VAD → segment buffer → STT provider
-→ editable transcript`. `MicrophoneSource` and `SystemAudioSource` are platform-independent
-concepts. Windows system audio will use a platform adapter, likely WASAPI loopback, without
-leaking Windows types into the domain. Creators can choose their microphone for their own
-commentary or system audio for a co-host or game conversation.
+The implemented flow is `AudioSource → local energy gate → Soniox WebSocket → live transcript
+→ editable composer`. Creators can choose the default microphone for commentary or Windows
+system-audio loopback for a co-host or game conversation. WASAPI runs in Rust on a blocking
+worker and requests 16 kHz mono PCM. Other platforms report the audio source unavailable.
 
-The initial STT choice is Gemini 3.5 Transcribe Live, configured for text-only transcripts,
-Russian/Ukrainian language detection, and a configurable technical-term vocabulary. The
-visible voice-input shortcut starts and stops capture; the finalized transcript is inserted
-into the composer for review and editing. Sending it to the text-generation path remains a
-separate explicit action and can include a selected screenshot.
-Live transcription sessions are limited to ten minutes and must reconnect during longer
-sessions. See the [Live Transcribe guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe).
+A local RMS energy gate keeps a short pre-roll and speech tail, and drops sustained silence
+before it reaches the network. Soniox `stt-rt-v5` receives speech frames, a keepalive during
+long pauses, Russian/Ukrainian/English language hints, common programming terms, and endpoint
+detection for pauses between phrases. Start and stop are explicit through a global Voice input
+shortcut or visible control. The finalized transcript is inserted into the composer for review
+and editing; the user separately sends it to text generation. Assistant output remains text
+only.
 
-VAD is local and selected later using latency, CPU, packaging, portability, and accuracy
-evidence. Raw audio is transient by default: capture, segment, transcribe, discard. Audio
-capture, VAD, and speech-to-text are not implemented in Phase 0.
+Raw PCM exists only in the capture-to-WebSocket buffer and is discarded; audio and transcripts
+are not written to disk or session history. The current implementation has no reconnect flow
+or measured latency data. Real device and live-provider checks are pending.
 
 ## 14. Screenshot assistance
 
@@ -321,10 +324,12 @@ extraction, or cost reduction.
   Tauri API boundary. Tests cover readiness, event validation, streaming, stale events,
   duplicate submission, keyboard behavior, cancellation, failure recovery, and focus.
 - Rust domain and application behavior uses unit and integration tests.
-- The OpenRouter adapter uses a local mock HTTP server for request mapping, SSE parsing,
-  still-image serialization, provider error classification, timeout, and cancellation.
-  Gemini uses the same Rust port and maps images to Gemini inline data; live Gemini requests
-  have not yet been verified with an API key.
+- OpenRouter uses a local mock HTTP server for request mapping, SSE parsing, still-image
+  serialization, provider error classification, timeout, and cancellation. OpenAI maps the
+  same text and image parts to Chat Completions; Gemini maps images to inline data. No live
+  provider request has been verified in this feature.
+  Voice tests cover transcript updates and local silence filtering; live audio-device checks
+  remain a manual requirement.
   Capture tests use fake backends; session tests use a fake router for follow-up context,
   screenshot composition, bounds and summaries, relevance filtering, reset, cancellation,
   and recovery after failures. Automated tests need no API key and make no provider calls.
@@ -450,18 +455,19 @@ previous text request plus screenshot through the provider boundary, safe errors
 cancellation. Full project checks passed on 2026-09-26; automated validation used neither
 live provider requests nor real screen captures.
 
-### Phase 2.5 — Global screenshot shortcuts and Binds settings
+### Phase 2.5 — Global capture and voice-input shortcuts
 
-**Goal:** Let users explicitly start the existing transient screenshot flow with configurable
+**Goal:** Let users explicitly start screenshot capture or voice input through configurable
 global shortcuts while the application is running.
 
 **Scope:** Rust-owned shortcut registration and versioned non-secret bind settings; a Binds
-view for recording, clearing, adding, removing, and saving screenshot shortcuts; monitor-under-
-pointer capture on native desktops and the existing consent-driven source picker on Wayland;
-always-on-top hide/capture/restore coordination; and an optional development launcher.
+view for recording, clearing, adding, removing, and saving screenshot and voice-input
+shortcuts; monitor-under-pointer capture on native desktops and the existing consent-driven
+source picker on Wayland; always-on-top hide/capture/restore coordination; and an optional
+development launcher.
 
-**Out of scope:** Audio, VAD, transcription, OCR, persistent screenshot data, stored API keys,
-tray or launch-at-login behavior, and actions other than Screenshot.
+**Out of scope:** OCR, persistent screenshot data, stored API keys, tray or launch-at-login
+behavior, and actions other than Screenshot and Voice input.
 
 **Acceptance criteria:** Global capture works while the app is active or minimized; the app is
 hidden from this app's own screenshot and returns above other windows; binding edits validate
@@ -471,8 +477,9 @@ smoke checks pass on supported operating systems.
 
 **Status:** In progress — implementation and automated validation are complete. Manual desktop
 smoke checks for active/minimized activation, always-on-top restore, capture without
-self-inclusion, and platform permission flows have not yet been recorded. Phase 3 remains
-`Not started`; Phase 4 remains `In progress`.
+self-inclusion, and platform permission flows have not yet been recorded. Voice shortcut
+activation is covered by the Rust registration boundary; real global-key smoke checks remain
+pending.
 
 ### Phase 2.6 — Broadcast capture protection
 
@@ -502,13 +509,13 @@ yet been recorded.
 audio, including a co-host's speech, and turn it into editable text for the assistant.
 
 **Scope:** Explicit start/stop voice-input shortcut, audio-source selection, Windows loopback
-and microphone capture, local VAD, segmentation, Gemini 3.5 Transcribe Live, transcript review
-and composer integration, and latency metrics. The creator sends the transcript as text after
-review; generated responses stay text-only.
+and microphone capture, local energy gate, Soniox `stt-rt-v5`, transcript review and composer
+integration, and latency metrics. The creator sends the transcript as text after review;
+generated responses stay text-only.
 
 **Out of scope:** Permanent recording, cloud silence detection, and advanced session routing.
 
-**Deliverables:** Platform adapters, VAD ADR/implementation, STT adapter, transcript events,
+**Deliverables:** Platform audio adapter, local speech gate, Soniox adapter, transcript events,
 UI, privacy-safe metrics, and tests.
 
 **Acceptance criteria:** Capture is visibly active and user-started; the selected speaker is
@@ -516,7 +523,10 @@ transcribed into editable text; the creator decides when to send it; silence sta
 segments are discarded; no spoken assistant response is generated; long sessions reconnect
 without losing transcript context; measured latency is documented.
 
-**Status:** Not started
+**Status:** In progress — explicit microphone/system-audio selection, Windows WASAPI capture,
+local energy filtering, Soniox streaming, a voice shortcut action, and editable composer
+insertion are implemented. Real device and live-key checks, reconnect behavior, and measured
+latency remain unverified.
 
 ### Phase 4 — Session intelligence
 
@@ -524,8 +534,8 @@ without losing transcript context; measured latency is documented.
 and dynamic-script response modes.
 
 **Scope:** Complete lifecycle, recent turns, rolling summaries, intent/context routing,
-combined screenshot + transcript requests through Gemini 3.8 Flash, modes, interruption, and
-cancellation.
+combined screenshot and user-submitted transcript requests through GPT-6 Luna, modes,
+interruption, and cancellation.
 
 **Out of scope:** Long-term history UI and release packaging.
 
@@ -615,9 +625,14 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 - Rust-only platform capture adapters, bounded image preparation, a five-minute transient
   image store, request-scoped image parts through the provider-neutral router, and OpenRouter
   and Gemini image mappings that preserve text-only request compatibility.
-- Versioned non-secret shortcut bindings, transactional native shortcut registration and
-  Wayland portal integration, monitor-under-pointer capture coordination, an always-on-top
-  window lifecycle, and the Settings → Binds view with transient hotkey previews.
+- Versioned non-secret screenshot and voice-input shortcut bindings, transactional native
+  shortcut registration and Wayland portal integration, monitor-under-pointer capture
+  coordination, an always-on-top window lifecycle, and Settings → Binds.
+- Rust-owned Soniox real-time speech transcription, a local RMS energy gate, Windows
+  microphone and system-audio capture through WASAPI, live transcript display, and explicit
+  insertion into the composer after stopping.
+- Direct OpenAI GPT-6 Luna text and screenshot streaming alongside the OpenRouter and Gemini
+  adapters; OpenAI, Soniox, Gemini, and OpenRouter keys stay in the desktop environment.
 - Windows-specific Tauri `contentProtected` configuration for the main window. Its behavior
   with real OBS display and window capture still needs manual smoke validation.
 - A development-only interactive/argument launcher with numbered workflow, model, and
@@ -628,14 +643,15 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 - Rust application-status service and `SessionService` with one active request.
 - Versioned context-pack validation, safe Markdown loading, deterministic selection, and
   bounded prompt construction.
-- Typed OpenRouter/Gemini configuration, Rust-only environment secret lookup for
-  `OPENROUTER_API_KEY` and `GEMINI_API_KEY`, provider-independent text-generation ports,
-  router, streaming adapters, timeout, cancellation, and safe failure classification.
+- Typed OpenAI/OpenRouter/Gemini configuration, Rust-only environment secret lookup for
+  `OPENAI_API_KEY`, `SONIOX_API_KEY`, `OPENROUTER_API_KEY`, and `GEMINI_API_KEY`,
+  provider-independent text-generation ports, router, streaming adapters, timeout,
+  cancellation, and safe failure classification.
 - Explicit permissions for the implemented application and screen-assistance commands and
   event listening and cleanup, no Tauri plugin permissions, and a production content security
   policy without `unsafe-inline`.
-- Fictional context-pack example, OpenRouter and Gemini setup instructions, and focused
-  provider and credential-boundary ADRs.
+- Fictional context-pack example, OpenAI/Soniox/OpenRouter/Gemini setup instructions, and
+  focused provider and credential-boundary ADRs.
 - Frontend behavior test, formatting, lint, type checking, build scripts, and CI.
 - Rust formatting, Clippy, test, and check scripts.
 - Public README, this engineering guide, and focused ADRs.
@@ -643,9 +659,9 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 
 ### Architecturally planned, not implemented
 
-Additional provider adapters, OS-backed credential storage, multiple chats, persisted
-session history, audio capture, VAD, transcription, voice-input controls, OCR, SQLite,
-history management, tray, compact mode, updater, signing, and production packaging.
+OS-backed credential storage, multiple chats, persisted session history, reconnecting long
+audio streams, OCR, SQLite, history management, tray, compact mode, updater, signing, and
+production packaging.
 
 ### Phase 0 validation record
 
@@ -703,6 +719,18 @@ manual desktop smoke criteria remain outstanding.
 | Desktop smoke on supported operating systems   | Attempted on Ubuntu 24.04.4 / GNOME 46 Wayland: GlobalShortcuts portal interface is absent, so binds cannot register; Xorg smoke remains pending |
 | Full project `pnpm check`                      | Passed on 2026-09-27: 44 frontend tests, 119 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check                            |
 
+### OpenAI and voice input validation record
+
+Automated checks use local tests and do not make paid OpenAI or Soniox requests. Desktop audio
+capture requires Windows hardware and operating-system access; live provider and microphone
+smoke checks remain pending until the user supplies credentials and tries the feature.
+
+| Check                                | Result                                                                                                                |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Full project `pnpm check`            | Passed on 2026-09-28: 46 frontend tests, 118 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check |
+| Live GPT-6 Luna text and image call  | Not run; requires the user's OpenAI API key                                                                           |
+| Soniox microphone/system-audio smoke | Not run; requires the user's Soniox API key and Windows audio devices                                                 |
+
 ### Screen assistance validation record
 
 All provider-facing tests use local mock HTTP responses or a fake Rust router. The run did
@@ -743,6 +771,7 @@ current stable compatible direct versions:
 - [ADR 0006: Global screenshot shortcuts and Rust-owned capture lifecycle](docs/adr/0006-global-screenshot-shortcuts.md)
 - [ADR 0007: Direct Gemini generation for text and screenshots](docs/adr/0007-gemini-generation.md)
 - [ADR 0008: Windows broadcast capture protection](docs/adr/0008-windows-broadcast-capture-protection.md)
+- [ADR 0009: OpenAI generation and Soniox voice transcription](docs/adr/0009-openai-soniox-providers.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform

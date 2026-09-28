@@ -1,6 +1,9 @@
 import { WorkspacePanel } from "../../components/ui/WorkspacePanel";
+import { useVoiceInputStore } from "../../stores/voice-input-store";
 
 export function TranscriptPanel() {
+  const phase = useVoiceInputStore((state) => state.phase);
+  const transcript = useVoiceInputStore((state) => state.transcript);
   return (
     <WorkspacePanel
       title="Transcript"
@@ -12,10 +15,20 @@ export function TranscriptPanel() {
           00:00
         </span>
         <div>
-          <p className="state-title">No transcript yet</p>
-          <p className="state-copy">
-            Spoken and typed context will appear here after a session starts.
-          </p>
+          {transcript.length > 0 ? (
+            <p className="state-copy" aria-live="polite">
+              {transcript}
+            </p>
+          ) : (
+            <>
+              <p className="state-title">
+                {phase === "recording" ? "Listening…" : "No transcript yet"}
+              </p>
+              <p className="state-copy">
+                Start voice input to see the live transcript here.
+              </p>
+            </>
+          )}
         </div>
       </div>
     </WorkspacePanel>

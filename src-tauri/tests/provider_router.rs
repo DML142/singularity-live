@@ -63,6 +63,20 @@ fn selects_openrouter_and_preserves_the_configured_model_and_timeout() {
     assert_eq!(router.request_timeout(), Duration::from_secs(25));
 }
 
+#[test]
+fn selects_openai_and_preserves_the_configured_model() {
+    let config = AppConfig::from_source(&ConfigMap(HashMap::from([
+        ("SINGULARITY_LIVE_PROVIDER", "openai".to_owned()),
+        ("SINGULARITY_LIVE_MODEL", "gpt-6-luna".to_owned()),
+        ("SINGULARITY_LIVE_CONTEXT_PACK", "fictional".to_owned()),
+    ])))
+    .expect("valid config");
+    let router = ProviderRouter::new(config, Arc::new(UnusedSecretStore), reqwest::Client::new());
+
+    assert_eq!(router.provider(), ProviderId::OpenAi);
+    assert_eq!(router.model().as_str(), "gpt-6-luna");
+}
+
 #[tokio::test]
 async fn maps_missing_credentials_to_a_safe_configuration_error() {
     let router = ProviderRouter::new(
@@ -91,4 +105,35 @@ async fn maps_missing_credentials_to_a_safe_configuration_error() {
     assert_eq!(error.kind, ProviderErrorKind::Configuration);
     assert_eq!(error.to_string(), "OpenRouter credential is not configured");
     assert!(!error.to_string().contains("sensitive"));
+}
+
+#[tokio::test]
+async fn maps_missing_openai_credentials_to_a_safe_configuration_error() {
+    let config = AppConfig::from_source(&ConfigMap(HashMap::from([
+        ("SINGULARITY_LIVE_PROVIDER", "openai".to_owned()),
+        ("SINGULARITY_LIVE_MODEL", "gpt-6-luna".to_owned()),
+        ("SINGULARITY_LIVE_CONTEXT_PACK", "fictional".to_owned()),
+    ])))
+    .expect("valid config");
+    let router = ProviderRouter::new(config, Arc::new(UnusedSecretStore), reqwest::Client::new());
+    let request = TextGenerationRequest {
+        request_id: RequestId::new(),
+        provider: router.provider(),
+        model: router.model().clone(),
+        selected_context: SelectedContext::default(),
+        system_prompt: "System".to_owned(),
+        messages: vec![ConversationMessage::user("User")],
+    };
+
+    let error = router
+        .stream(
+            &request,
+            tokio_util::sync::CancellationToken::new(),
+            &NoopSink,
+        )
+        .await
+        .expect_err("missing credential must fail before networking");
+
+    assert_eq!(error.kind, ProviderErrorKind::Configuration);
+    assert_eq!(error.to_string(), "OpenAI credential is not configured");
 }

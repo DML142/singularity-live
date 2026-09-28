@@ -13,13 +13,15 @@ use crate::{
 };
 
 use super::{
-    GeminiAdapter, OpenRouterAdapter, StreamSink, TextGenerationProvider, TextGenerationRouter,
+    GeminiAdapter, OpenAiAdapter, OpenRouterAdapter, StreamSink, TextGenerationProvider,
+    TextGenerationRouter,
 };
 
 pub struct ProviderRouter {
     config: AppConfig,
     secret_store: Arc<dyn SecretStore>,
     openrouter: OpenRouterAdapter,
+    openai: OpenAiAdapter,
     gemini: GeminiAdapter,
 }
 
@@ -31,11 +33,13 @@ impl ProviderRouter {
         client: reqwest::Client,
     ) -> Self {
         let openrouter = OpenRouterAdapter::new(client.clone(), config.request_timeout());
+        let openai = OpenAiAdapter::new(client.clone(), config.request_timeout());
         let gemini = GeminiAdapter::new(client, config.request_timeout());
         Self {
             config,
             secret_store,
             openrouter,
+            openai,
             gemini,
         }
     }
@@ -91,6 +95,11 @@ impl TextGenerationRouter for ProviderRouter {
                     .stream(request, &secret, cancellation, sink)
                     .await
             }
+            ProviderId::OpenAi => {
+                self.openai
+                    .stream(request, &secret, cancellation, sink)
+                    .await
+            }
             ProviderId::Gemini => {
                 self.gemini
                     .stream(request, &secret, cancellation, sink)
@@ -103,6 +112,7 @@ impl TextGenerationRouter for ProviderRouter {
 const fn secret_name(provider: ProviderId) -> SecretName {
     match provider {
         ProviderId::OpenRouter => SecretName::OpenRouterApiKey,
+        ProviderId::OpenAi => SecretName::OpenAiApiKey,
         ProviderId::Gemini => SecretName::GeminiApiKey,
     }
 }
@@ -110,6 +120,7 @@ const fn secret_name(provider: ProviderId) -> SecretName {
 const fn missing_key_message(provider: ProviderId) -> &'static str {
     match provider {
         ProviderId::OpenRouter => "OpenRouter credential is not configured",
+        ProviderId::OpenAi => "OpenAI credential is not configured",
         ProviderId::Gemini => "Gemini credential is not configured",
     }
 }

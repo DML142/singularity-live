@@ -7,8 +7,15 @@ import { pathToFileURL } from "node:url";
 
 const DEFAULT_MODEL = "google/gemma-4-31b-it:free";
 const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+const DEFAULT_OPENAI_MODEL = "gpt-6-luna";
 const DEFAULT_TIMEOUT_SECONDS = "60";
 const MODEL_PROFILES = [
+  {
+    value: "gpt-6-luna",
+    label: "OpenAI — GPT-6 Luna (text and screenshots)",
+    provider: "openai",
+    model: DEFAULT_OPENAI_MODEL,
+  },
   {
     value: "gemini-3.8-flash",
     label: "Google AI Studio — Gemini 3.8 Flash (text and screenshots)",
@@ -51,8 +58,8 @@ export async function launchDevAssist({
     validateValues(values);
     const childEnvironment = {
       ...env,
-      [values.provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY"]:
-        values.apiKey,
+      [apiKeyName(values.provider)]: values.apiKey,
+      ...(values.sonioxApiKey ? { SONIOX_API_KEY: values.sonioxApiKey } : {}),
       SINGULARITY_LIVE_PROVIDER: values.provider,
       SINGULARITY_LIVE_MODEL: values.model,
       SINGULARITY_LIVE_CONTEXT_PACK: values.contextPack,
@@ -146,8 +153,12 @@ async function collectInteractiveValues(env, platform, prompts) {
     model = profile.model;
   } else if (!model) {
     model = await prompts.promptText(
-      "Model ID (OpenRouter slug or Gemini model ID)",
-      configuredProvider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_MODEL,
+      "Model ID (provider model ID)",
+      configuredProvider === "gemini"
+        ? DEFAULT_GEMINI_MODEL
+        : configuredProvider === "openai"
+          ? DEFAULT_OPENAI_MODEL
+          : DEFAULT_MODEL,
     );
   }
   provider ||= inferProvider(model);
@@ -164,17 +175,21 @@ async function collectInteractiveValues(env, platform, prompts) {
   } else if (!contextPack) {
     contextPack = await prompts.promptText("Installed context pack ID", "");
   }
-  const keyName = provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY";
-  const providerLabel = provider === "gemini" ? "Google AI Studio" : "OpenRouter";
+  const keyName = apiKeyName(provider);
+  const providerLabel = providerLabelFor(provider);
   const apiKey =
     env[keyName] ||
     (await prompts.promptSecret(`${providerLabel} API key (input hidden): `));
+  const sonioxApiKey =
+    env.SONIOX_API_KEY ||
+    (await prompts.promptSecret("Soniox API key (optional; press Enter to skip): "));
   return {
     task,
     provider,
     model,
     contextPack,
     apiKey,
+    sonioxApiKey,
     timeoutSeconds:
       env.SINGULARITY_LIVE_REQUEST_TIMEOUT_SECONDS || DEFAULT_TIMEOUT_SECONDS,
   };
@@ -278,9 +293,13 @@ function parseArgumentValues(argv, env) {
   const model =
     options.get("--model") ||
     env.SINGULARITY_LIVE_MODEL ||
-    (env.SINGULARITY_LIVE_PROVIDER === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_MODEL);
+    (env.SINGULARITY_LIVE_PROVIDER === "gemini"
+      ? DEFAULT_GEMINI_MODEL
+      : env.SINGULARITY_LIVE_PROVIDER === "openai"
+        ? DEFAULT_OPENAI_MODEL
+        : DEFAULT_MODEL);
   const provider = env.SINGULARITY_LIVE_PROVIDER || inferProvider(model);
-  const keyName = provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY";
+  const keyName = apiKeyName(provider);
   const apiKey = env[keyName];
   if (!apiKey || apiKey.trim().length === 0) {
     throw new Error(`Set ${keyName} in the environment before using argument mode`);
@@ -292,6 +311,7 @@ function parseArgumentValues(argv, env) {
     contextPack:
       options.get("--context-pack") || env.SINGULARITY_LIVE_CONTEXT_PACK || "",
     apiKey,
+    sonioxApiKey: env.SONIOX_API_KEY || "",
     timeoutSeconds:
       options.get("--timeout-seconds") ||
       env.SINGULARITY_LIVE_REQUEST_TIMEOUT_SECONDS ||
@@ -303,8 +323,8 @@ function validateValues(values) {
   if (!TASKS.some((task) => task.value === values.task)) {
     throw new Error("Choose a supported assistance workflow");
   }
-  if (values.provider !== "openrouter" && values.provider !== "gemini") {
-    throw new Error("Choose openrouter or gemini as the configured provider");
+  if (!["openai", "openrouter", "gemini"].includes(values.provider)) {
+    throw new Error("Choose openai, openrouter, or gemini as the configured provider");
   }
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(values.model) ||
@@ -319,14 +339,32 @@ function validateValues(values) {
     throw new Error("Request timeout must be an integer from 5 to 300 seconds");
   }
   if (typeof values.apiKey !== "string" || values.apiKey.trim().length === 0) {
-    throw new Error(
-      `Set ${values.provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY"} before launching the app`,
-    );
+    throw new Error(`Set ${apiKeyName(values.provider)} before launching the app`);
   }
 }
 
 function inferProvider(model) {
-  return /^gemini(?:[-/]|$)/i.test(model) ? "gemini" : "openrouter";
+  if (/^gemini(?:[-/]|$)/i.test(model)) {
+    return "gemini";
+  }
+  if (/^gpt-/i.test(model)) {
+    return "openai";
+  }
+  return "openrouter";
+}
+
+function apiKeyName(provider) {
+  if (provider === "openai") {
+    return "OPENAI_API_KEY";
+  }
+  return provider === "gemini" ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY";
+}
+
+function providerLabelFor(provider) {
+  if (provider === "openai") {
+    return "OpenAI";
+  }
+  return provider === "gemini" ? "Google AI Studio" : "OpenRouter";
 }
 
 function looksLikeCredential(value) {

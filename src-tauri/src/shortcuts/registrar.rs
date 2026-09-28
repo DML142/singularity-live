@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, RwLock},
 };
 
 use async_trait::async_trait;
@@ -8,11 +8,12 @@ use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use super::{
-    BindingRegistrationFailure, ShortcutBinding, ShortcutBindingId, ShortcutBindingView,
-    ShortcutChord, ShortcutRegistrar, ShortcutRegistrarError, ShortcutRegistrationState,
+    BindingRegistrationFailure, ShortcutAction, ShortcutBinding, ShortcutBindingId,
+    ShortcutBindingView, ShortcutChord, ShortcutRegistrar, ShortcutRegistrarError,
+    ShortcutRegistrationState,
 };
 
-pub(crate) type ShortcutActivationHandler = Arc<dyn Fn() + Send + Sync + 'static>;
+pub(crate) type ShortcutActivationHandler = Arc<dyn Fn(ShortcutAction) + Send + Sync + 'static>;
 
 pub(crate) fn platform_shortcut_registrar(
     app: AppHandle,
@@ -124,6 +125,7 @@ struct TauriShortcutRegistrar {
     app: AppHandle,
     activation: ShortcutActivationHandler,
     active: Mutex<HashSet<String>>,
+    actions: Arc<RwLock<HashMap<String, ShortcutAction>>>,
 }
 
 impl TauriShortcutRegistrar {
@@ -132,6 +134,7 @@ impl TauriShortcutRegistrar {
             app,
             activation,
             active: Mutex::new(HashSet::new()),
+            actions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -143,11 +146,20 @@ impl TauriShortcutRegistrar {
 
     fn register_expression(&self, expression: &str) -> Result<(), String> {
         let activation = Arc::clone(&self.activation);
+        let action_map = Arc::clone(&self.actions);
+        let registered_expression = expression.to_owned();
         self.app
             .global_shortcut()
             .on_shortcut(expression, move |_app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    activation();
+                    let action = action_map
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .get(&registered_expression)
+                        .copied();
+                    if let Some(action) = action {
+                        activation(action);
+                    }
                 }
             })
             .map_err(|error| format!("Shortcut registration failed: {error}"))
@@ -219,7 +231,10 @@ impl ShortcutRegistrar for TauriShortcutRegistrar {
     async fn register_available(&self, bindings: &[ShortcutBinding]) -> Vec<ShortcutBindingView> {
         let active = self.active_lock().clone();
         let (added, failed) = self.register_candidates(bindings, &active);
-        self.active_lock().extend(added);
+        let mut registered = active;
+        registered.extend(added);
+        self.replace_action_map(bindings, &registered);
+        *self.active_lock() = registered;
         Self::outcome_views(bindings, &failed)
     }
 
@@ -267,6 +282,7 @@ impl ShortcutRegistrar for TauriShortcutRegistrar {
         }
         let mut current = self.active_lock();
         *current = desired;
+        self.replace_action_map(bindings, &current);
         Ok(Self::outcome_views(bindings, &HashMap::new()))
     }
 
@@ -279,10 +295,32 @@ impl ShortcutRegistrar for TauriShortcutRegistrar {
             }
         }
         *self.active_lock() = failed;
+        self.actions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         if self.active_lock().is_empty() {
             Ok(())
         } else {
             Err(ShortcutRegistrarError::Unavailable)
+        }
+    }
+}
+
+impl TauriShortcutRegistrar {
+    fn replace_action_map(&self, bindings: &[ShortcutBinding], registered: &HashSet<String>) {
+        let mut actions = self
+            .actions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        actions.clear();
+        for binding in bindings {
+            if let Some(chord) = &binding.chord {
+                let expression = native_shortcut_expression(chord);
+                if registered.contains(&expression) {
+                    actions.insert(expression, binding.action);
+                }
+            }
         }
     }
 }

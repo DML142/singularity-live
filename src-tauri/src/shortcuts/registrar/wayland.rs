@@ -13,17 +13,16 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use super::super::{
-    BindingRegistrationFailure, ShortcutBinding, ShortcutBindingView, ShortcutRegistrar,
-    ShortcutRegistrarError, ShortcutRegistrationState,
+    BindingRegistrationFailure, ShortcutAction, ShortcutBinding, ShortcutBindingView,
+    ShortcutRegistrar, ShortcutRegistrarError, ShortcutRegistrationState,
 };
-use super::portal_preferred_trigger;
-
-type ShortcutActivationHandler = Arc<dyn Fn() + Send + Sync + 'static>;
+use super::{ShortcutActivationHandler, portal_preferred_trigger};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PortalShortcutRequest {
     binding_id: String,
     preferred_trigger: String,
+    action: ShortcutAction,
 }
 
 #[async_trait]
@@ -126,6 +125,7 @@ impl PortalShortcutRegistrar {
             requests.push(PortalShortcutRequest {
                 binding_id: id,
                 preferred_trigger: trigger,
+                action: binding.action,
             });
         }
         if requests.is_empty() {
@@ -293,7 +293,11 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
         let shortcuts = requests
             .iter()
             .map(|request| {
-                NewShortcut::new(&request.binding_id, "Capture the current screen")
+                let description = match request.action {
+                    ShortcutAction::Screenshot => "Capture the current screen",
+                    ShortcutAction::VoiceInput => "Toggle voice input",
+                };
+                NewShortcut::new(&request.binding_id, description)
                     .preferred_trigger(Some(request.preferred_trigger.as_str()))
             })
             .collect::<Vec<_>>();
@@ -319,6 +323,10 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
             })
             .collect::<HashMap<_, _>>();
         let active_ids = effective_triggers.keys().cloned().collect::<HashSet<_>>();
+        let action_by_id = requests
+            .iter()
+            .map(|request| (request.binding_id.clone(), request.action))
+            .collect::<HashMap<_, _>>();
         let cancellation = CancellationToken::new();
         let task_cancellation = cancellation.clone();
         tauri::async_runtime::spawn(async move {
@@ -330,7 +338,9 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
                             break;
                         };
                         if active_ids.contains(event.shortcut_id()) {
-                            activation();
+                            if let Some(action) = action_by_id.get(event.shortcut_id()).copied() {
+                                activation(action);
+                            }
                         }
                     }
                 }
@@ -410,7 +420,7 @@ mod tests {
         async fn bind(
             &self,
             requests: &[PortalShortcutRequest],
-            _activation: Arc<dyn Fn() + Send + Sync>,
+            _activation: Arc<dyn Fn(ShortcutAction) + Send + Sync>,
         ) -> Result<PortalBoundShortcuts, super::super::ShortcutRegistrarError> {
             self.requests
                 .lock()

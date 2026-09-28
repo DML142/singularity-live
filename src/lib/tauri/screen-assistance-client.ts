@@ -161,7 +161,7 @@ export function screenCaptureErrorMessage(error: unknown): string {
     case "noPreviousRequest":
       return "Ask a text question before sending a screenshot";
     case "notConfigured":
-      return "Configure OpenRouter and a context pack before sending a request";
+      return "Configure a text provider and context pack before sending a request";
     case "contextUnavailable":
       return "The configured context pack could not be loaded";
     case "unavailable":

@@ -10,6 +10,7 @@ import {
 
 describe("development assist launcher", () => {
   const promptChoice = vi.fn<DevAssistOptions["promptChoice"]>();
+  const promptMenu = vi.fn<NonNullable<DevAssistOptions["promptMenu"]>>();
   const promptText = vi.fn<DevAssistOptions["promptText"]>();
   const promptSecret = vi.fn<DevAssistOptions["promptSecret"]>();
   const spawn = vi.fn<DevAssistOptions["spawn"]>();
@@ -17,6 +18,7 @@ describe("development assist launcher", () => {
 
   beforeEach(() => {
     promptChoice.mockReset().mockResolvedValue("screenshot");
+    promptMenu.mockReset().mockResolvedValue("gpt-6-luna");
     promptText.mockReset().mockResolvedValue("fictional-developer");
     promptSecret.mockReset().mockResolvedValue("test-openrouter-secret");
     spawn.mockReset().mockResolvedValue(0);
@@ -37,7 +39,7 @@ describe("development assist launcher", () => {
 
     expect(result).toBe(0);
     expect(promptChoice).toHaveBeenCalledOnce();
-    expect(promptSecret).toHaveBeenCalledOnce();
+    expect(promptSecret).toHaveBeenCalledTimes(2);
     const spawnedCall = spawn.mock.calls.at(0);
     expect(spawnedCall).toBeDefined();
     if (spawnedCall === undefined) {
@@ -47,11 +49,45 @@ describe("development assist launcher", () => {
     expect(command).toBe("pnpm");
     expect(args).toEqual(["tauri", "dev"]);
     expect(options.env.OPENROUTER_API_KEY).toBe("test-openrouter-secret");
+    expect(options.env.SONIOX_API_KEY).toBe("test-openrouter-secret");
     expect(options.env.SINGULARITY_LIVE_DEV_ASSIST_TASK).toBe("screenshot");
     expect(options.env.VITE_SINGULARITY_LIVE_DEV_ASSIST_TASK).toBe("screenshot");
     expect(writeError).not.toHaveBeenCalledWith(
       expect.stringContaining("test-openrouter-secret"),
     );
+  });
+
+  it("offers GPT-6 Luna and passes both provider keys only to the child process", async () => {
+    promptSecret
+      .mockReset()
+      .mockResolvedValueOnce("test-openai-secret")
+      .mockResolvedValueOnce("test-soniox-secret");
+
+    const result = await launchDevAssist({
+      argv: [],
+      env: { SINGULARITY_LIVE_CONTEXT_PACK: "fictional-developer" },
+      platform: "linux",
+      promptChoice,
+      promptMenu,
+      promptText,
+      promptSecret,
+      spawn,
+      writeError,
+    });
+
+    expect(result).toBe(0);
+    expect(promptMenu).toHaveBeenCalledOnce();
+    const spawnedCall = spawn.mock.calls.at(0);
+    expect(spawnedCall).toBeDefined();
+    if (spawnedCall === undefined) {
+      throw new Error("The dev process was not started");
+    }
+    const [, , options] = spawnedCall;
+    expect(options.env.OPENAI_API_KEY).toBe("test-openai-secret");
+    expect(options.env.SONIOX_API_KEY).toBe("test-soniox-secret");
+    expect(options.env.SINGULARITY_LIVE_PROVIDER).toBe("openai");
+    expect(options.env.SINGULARITY_LIVE_MODEL).toBe("gpt-6-luna");
+    expect(writeError).not.toHaveBeenCalled();
   });
 
   it("starts the Tauri development command through the Windows command processor", async () => {

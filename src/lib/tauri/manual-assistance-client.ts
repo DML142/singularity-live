@@ -5,7 +5,7 @@ const MAX_MANUAL_TEXT_BYTES = 16 * 1024;
 const REQUEST_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type ProviderId = "open_router" | "gemini";
+export type ProviderId = "open_router" | "open_ai" | "gemini";
 
 export type ManualAssistanceReadiness =
   | {
@@ -237,7 +237,7 @@ function isErrorCode(value: string): value is ManualAssistanceErrorCode {
 }
 
 function isProviderId(value: unknown): value is ProviderId {
-  return value === "open_router" || value === "gemini";
+  return value === "open_router" || value === "open_ai" || value === "gemini";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

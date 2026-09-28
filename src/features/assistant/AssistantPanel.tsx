@@ -13,6 +13,7 @@ import { WorkspacePanel } from "../../components/ui/WorkspacePanel";
 import type { CropRect } from "../../lib/tauri/screen-assistance-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
 import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
+import { useVoiceInputStore } from "../../stores/voice-input-store";
 
 interface AssistantPanelProps {
   readonly initialTask?: "text" | "screenshot" | undefined;
@@ -54,6 +55,16 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   );
   const clearScreenForReset = useScreenAssistanceStore(
     (state) => state.clearForSessionReset,
+  );
+  const voicePhase = useVoiceInputStore((state) => state.phase);
+  const voiceSource = useVoiceInputStore((state) => state.source);
+  const voiceError = useVoiceInputStore((state) => state.error);
+  const finalizedTranscript = useVoiceInputStore((state) => state.finalizedTranscript);
+  const setVoiceSource = useVoiceInputStore((state) => state.setSource);
+  const startVoiceInput = useVoiceInputStore((state) => state.start);
+  const stopVoiceInput = useVoiceInputStore((state) => state.stop);
+  const clearFinalizedTranscript = useVoiceInputStore(
+    (state) => state.clearFinalizedTranscript,
   );
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -119,10 +130,26 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
     }
   }, [turns]);
 
+  useEffect(() => {
+    if (finalizedTranscript !== null) {
+      composerRef.current?.focus();
+    }
+  }, [finalizedTranscript]);
+
+  const draftText =
+    finalizedTranscript === null
+      ? text
+      : text.trim().length === 0
+        ? finalizedTranscript.text
+        : `${text.trim()}\n${finalizedTranscript.text}`;
+
   const submitPrompt = (prompt: string) => {
     if (prompt.trim().length > 0) {
       stickToBottom.current = true;
       setText("");
+      if (finalizedTranscript !== null) {
+        clearFinalizedTranscript(finalizedTranscript.id);
+      }
       if (composerRef.current !== null) {
         composerRef.current.style.height = "56px";
       }
@@ -132,13 +159,13 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    submitPrompt(text);
+    submitPrompt(draftText);
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      submitPrompt(text);
+      submitPrompt(draftText);
     }
   };
 
@@ -220,6 +247,72 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   return (
     <WorkspacePanel title="Assistant" detail={detail} className="assistant-panel">
       <div className="assistant-body">
+        <section className="screen-assistance" aria-label="Voice input">
+          <div className="screen-assistance-heading">
+            <div>
+              <p className="screen-assistance-title">Voice input · Soniox</p>
+              <p className="screen-assistance-copy">
+                Transcribed speech appears in the composer for review. Sending stays
+                manual.
+              </p>
+            </div>
+          </div>
+          <div className="screen-assistance-controls">
+            <label className="screen-source-label" htmlFor="voice-source-kind">
+              Source
+            </label>
+            <select
+              id="voice-source-kind"
+              value={voiceSource}
+              disabled={
+                voicePhase === "connecting" ||
+                voicePhase === "recording" ||
+                voicePhase === "stopping"
+              }
+              onChange={(event) => {
+                if (
+                  event.currentTarget.value === "microphone" ||
+                  event.currentTarget.value === "system_audio"
+                ) {
+                  void setVoiceSource(event.currentTarget.value);
+                }
+              }}
+            >
+              <option value="microphone">Microphone</option>
+              <option value="system_audio">System audio</option>
+            </select>
+            <button
+              className="screen-capture-action"
+              type="button"
+              onClick={() => {
+                if (voicePhase === "recording") {
+                  void stopVoiceInput();
+                } else {
+                  void startVoiceInput();
+                }
+              }}
+              disabled={voicePhase === "connecting" || voicePhase === "stopping"}
+            >
+              {voicePhase === "connecting"
+                ? "Connecting…"
+                : voicePhase === "recording"
+                  ? "Stop voice input"
+                  : voicePhase === "stopping"
+                    ? "Finalizing…"
+                    : "Start voice input"}
+            </button>
+            {voicePhase === "recording" ? (
+              <span className="screen-permission-hint" role="status">
+                Voice input active
+              </span>
+            ) : null}
+          </div>
+          {voiceError !== null ? (
+            <p className="screen-assistance-error" role="alert">
+              {voiceError}
+            </p>
+          ) : null}
+        </section>
         {readiness.phase === "loading" ? (
           <div className="assistant-notice" role="status" aria-live="polite">
             Checking provider and context pack…
@@ -231,8 +324,8 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
               <p className="state-title">Manual assistance needs setup</p>
               <p className="state-copy">{readiness.message}</p>
               <p className="state-copy">
-                Configure OpenRouter in the desktop process and install a context pack
-                in the application data directory.
+                Configure a text provider in the desktop process and install a context
+                pack in the application data directory.
               </p>
             </div>
           </div>
@@ -606,12 +699,15 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
                 id="manual-assistance-input"
                 name="text"
                 rows={2}
-                value={text}
+                value={draftText}
                 maxLength={16 * 1024}
                 placeholder="Write or paste text to work with…"
                 onChange={(event) => {
                   const composer = event.currentTarget;
                   setText(composer.value);
+                  if (finalizedTranscript !== null) {
+                    clearFinalizedTranscript(finalizedTranscript.id);
+                  }
                   composer.style.height = "auto";
                   composer.style.height = `${String(Math.min(composer.scrollHeight, 160))}px`;
                 }}
@@ -638,7 +734,7 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
                   <button
                     className="assistant-send"
                     type="submit"
-                    disabled={!text.trim() || busy || resetPending}
+                    disabled={!draftText.trim() || busy || resetPending}
                   >
                     {phase === "starting" ? "Starting" : "Send"}
                   </button>

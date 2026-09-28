@@ -5,7 +5,9 @@ use thiserror::Error;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecretName {
     OpenRouterApiKey,
+    OpenAiApiKey,
     GeminiApiKey,
+    SonioxApiKey,
 }
 
 impl SecretName {
@@ -13,7 +15,9 @@ impl SecretName {
     pub const fn environment_key(self) -> &'static str {
         match self {
             Self::OpenRouterApiKey => "OPENROUTER_API_KEY",
+            Self::OpenAiApiKey => "OPENAI_API_KEY",
             Self::GeminiApiKey => "GEMINI_API_KEY",
+            Self::SonioxApiKey => "SONIOX_API_KEY",
         }
     }
 }

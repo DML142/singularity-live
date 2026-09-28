@@ -25,6 +25,7 @@ pub enum IdentifierError {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderId {
     OpenRouter,
+    OpenAi,
     Gemini,
 }
 

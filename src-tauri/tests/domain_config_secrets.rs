@@ -65,7 +65,7 @@ fn configuration_rejects_unsupported_providers() {
     assert_eq!(error, ConfigError::UnsupportedProvider);
     assert_eq!(
         error.to_string(),
-        "Unsupported provider; expected openrouter or gemini"
+        "Unsupported provider; expected openai, openrouter, or gemini"
     );
     assert!(!error.to_string().contains(untrusted_value));
 }
@@ -104,6 +104,22 @@ fn configuration_produces_typed_provider_model_and_pack_values() {
         &ModelId::new("openrouter/free").expect("model")
     );
     assert_eq!(config.context_pack(), "fictional-developer");
+}
+
+#[test]
+fn configuration_selects_openai_for_the_configured_model() {
+    let mut source = MapConfigSource::valid();
+    source
+        .values
+        .insert("SINGULARITY_LIVE_PROVIDER", "openai".to_owned());
+    source
+        .values
+        .insert("SINGULARITY_LIVE_MODEL", "gpt-6-luna".to_owned());
+
+    let config = AppConfig::from_source(&source).expect("valid OpenAI config");
+
+    assert_eq!(config.provider(), ProviderId::OpenAi);
+    assert_eq!(config.model(), &ModelId::new("gpt-6-luna").expect("model"));
 }
 
 #[test]

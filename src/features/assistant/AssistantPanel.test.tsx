@@ -5,6 +5,7 @@ import type { ManualAssistanceEvent } from "../../lib/tauri/manual-assistance-cl
 import type { CapturePreview } from "../../lib/tauri/screen-assistance-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
 import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
+import { useVoiceInputStore } from "../../stores/voice-input-store";
 import { AssistantPanel } from "./AssistantPanel";
 
 const client = vi.hoisted(() => ({
@@ -125,6 +126,13 @@ describe("manual assistant panel", () => {
       preview: null,
       error: null,
     });
+    useVoiceInputStore.setState({
+      phase: "idle",
+      source: "microphone",
+      transcript: "",
+      error: null,
+      finalizedTranscript: null,
+    });
   });
 
   it("focuses screen help when launched with the screenshot task preset", async () => {
@@ -186,6 +194,32 @@ describe("manual assistant panel", () => {
 
     await waitFor(() => expect(composer).toHaveFocus());
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("places finalized voice text in the composer for review and manual sending", async () => {
+    useVoiceInputStore.setState({
+      finalizedTranscript: { id: 17, text: "Explain this Rust error" },
+    });
+    render(<AssistantPanel />);
+
+    const composer = await screen.findByRole("textbox", {
+      name: "Ask for assistance",
+    });
+    expect(composer).toHaveValue("Explain this Rust error");
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+
+    fireEvent.change(composer, {
+      target: { value: "Explain this Rust error in simple terms" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(client.start).toHaveBeenCalledWith(
+        "Explain this Rust error in simple terms",
+      );
+    });
+    expect(composer).toHaveValue("");
+    expect(useVoiceInputStore.getState().finalizedTranscript).toBeNull();
   });
 
   it("keeps both sides of each exchange visible without sending prior turns again", async () => {

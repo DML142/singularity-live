@@ -5,7 +5,7 @@ const UUID_PATTERN =
 const MODIFIERS = ["control", "alt", "shift", "super"] as const;
 
 export type ShortcutModifier = (typeof MODIFIERS)[number];
-export type ShortcutAction = "screenshot";
+export type ShortcutAction = "screenshot" | "voice_input";
 
 export interface ShortcutChord {
   readonly modifiers: readonly ShortcutModifier[];
@@ -132,7 +132,7 @@ function isShortcutBinding(value: unknown): value is ShortcutBinding {
     isRecord(value) &&
     hasExactKeys(value, ["id", "action", "chord"]) &&
     isUuid(value.id) &&
-    value.action === "screenshot" &&
+    (value.action === "screenshot" || value.action === "voice_input") &&
     (value.chord === null || isShortcutChord(value.chord))
   );
 }

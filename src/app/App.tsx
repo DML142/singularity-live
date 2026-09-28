@@ -7,12 +7,14 @@ import { TranscriptPanel } from "../features/transcript/TranscriptPanel";
 import { useApplicationStatusStore } from "../stores/application-status-store";
 import { useScreenAssistanceStore } from "../stores/screen-assistance-store";
 import { listenForHotkeyCapture } from "../lib/tauri/hotkey-capture-client";
+import { useVoiceInputStore } from "../stores/voice-input-store";
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const devAssistTask = import.meta.env.VITE_SINGULARITY_LIVE_DEV_ASSIST_TASK;
   const backend = useApplicationStatusStore((state) => state.backend);
   const loadStatus = useApplicationStatusStore((state) => state.loadStatus);
+  const initializeVoiceInput = useVoiceInputStore((state) => state.initialize);
   const acceptHotkeyCapture = useScreenAssistanceStore(
     (state) => state.acceptHotkeyCapture,
   );
@@ -27,6 +29,22 @@ export function App() {
   useEffect(() => {
     void loadStatus();
   }, [loadStatus]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void initializeVoiceInput().then((stopListening) => {
+      if (disposed) {
+        stopListening();
+      } else {
+        unlisten = stopListening;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [initializeVoiceInput]);
 
   useEffect(() => {
     let mounted = true;

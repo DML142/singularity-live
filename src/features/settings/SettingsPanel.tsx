@@ -7,6 +7,7 @@ import {
   updateShortcutBindings,
   type ShortcutBinding,
   type ShortcutBindingView,
+  type ShortcutAction,
   type ShortcutChord,
 } from "../../lib/tauri/shortcut-client";
 import { recordedShortcutFromEvent } from "./key-chord";
@@ -58,6 +59,15 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
     setDrafts((current) =>
       current.map((binding) =>
         binding.id === bindingId ? { ...binding, chord } : binding,
+      ),
+    );
+    setError(null);
+  }
+
+  function updateAction(bindingId: string, action: ShortcutAction): void {
+    setDrafts((current) =>
+      current.map((binding) =>
+        binding.id === bindingId ? { ...binding, action } : binding,
       ),
     );
     setError(null);
@@ -121,8 +131,8 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
           <p className="settings-eyebrow">Settings</p>
           <h2 id="settings-heading">Binds</h2>
           <p className="settings-description">
-            Configure global shortcuts for explicit screenshot capture. Changes take
-            effect after saving.
+            Configure screenshot capture and voice input shortcuts. Changes take effect
+            after saving.
           </p>
         </div>
         <button className="settings-back-button" type="button" onClick={onBack}>
@@ -179,8 +189,21 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                   </div>
                   <label className="shortcut-action-label">
                     Action
-                    <select aria-label="Action" value="screenshot" disabled>
+                    <select
+                      aria-label="Action"
+                      value={binding.action}
+                      disabled={saving}
+                      onChange={(event) => {
+                        if (
+                          event.currentTarget.value === "screenshot" ||
+                          event.currentTarget.value === "voice_input"
+                        ) {
+                          updateAction(binding.id, event.currentTarget.value);
+                        }
+                      }}
+                    >
                       <option value="screenshot">Screenshot</option>
+                      <option value="voice_input">Voice input</option>
                     </select>
                   </label>
                   <div className="shortcut-chord-controls">

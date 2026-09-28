@@ -18,6 +18,9 @@
     "allow-start-screenshot-assistance",
     "allow-get-shortcut-bindings",
     "allow-update-shortcut-bindings",
+    "allow-set-voice-input-source",
+    "allow-start-voice-input",
+    "allow-stop-voice-input",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

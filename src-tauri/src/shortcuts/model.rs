@@ -38,6 +38,7 @@ impl ShortcutPlatform {
 #[serde(rename_all = "snake_case")]
 pub enum ShortcutAction {
     Screenshot,
+    VoiceInput,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
