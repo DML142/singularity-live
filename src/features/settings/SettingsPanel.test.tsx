@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPanel } from "./SettingsPanel";
@@ -14,6 +14,10 @@ const { getShortcutBindingsMock, updateShortcutBindingsMock } = vi.hoisted(() =>
       (bindings: readonly ShortcutBinding[]) => Promise<readonly ShortcutBindingView[]>
     >(),
 }));
+const { getWindowOpacityMock, setWindowOpacityMock } = vi.hoisted(() => ({
+  getWindowOpacityMock: vi.fn<() => Promise<number>>(),
+  setWindowOpacityMock: vi.fn<(percentage: number) => Promise<number>>(),
+}));
 
 vi.mock("../../lib/tauri/shortcut-client", async () => {
   const actual = await vi.importActual<
@@ -25,6 +29,11 @@ vi.mock("../../lib/tauri/shortcut-client", async () => {
     updateShortcutBindings: updateShortcutBindingsMock,
   };
 });
+vi.mock("../../lib/tauri/customization-client", () => ({
+  DEFAULT_WINDOW_OPACITY: 100,
+  getWindowOpacity: getWindowOpacityMock,
+  setWindowOpacity: setWindowOpacityMock,
+}));
 
 const initialView: ShortcutBindingView = {
   binding: {
@@ -41,6 +50,11 @@ const initialView: ShortcutBindingView = {
 describe("Binds settings", () => {
   beforeEach(() => {
     getShortcutBindingsMock.mockReset().mockResolvedValue([initialView]);
+    getWindowOpacityMock.mockReset().mockResolvedValue(100);
+    setWindowOpacityMock
+      .mockReset()
+      .mockImplementation((value) => Promise.resolve(value));
+    delete document.documentElement.dataset.appOpacity;
     updateShortcutBindingsMock.mockReset().mockImplementation((bindings) =>
       Promise.resolve(
         bindings.map((binding) => ({
@@ -102,5 +116,33 @@ describe("Binds settings", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Try an X11 session or a Wayland desktop with GlobalShortcuts support",
     );
+  });
+
+  it("lets users bind quick send and voice recording actions", async () => {
+    render(<SettingsPanel onBack={() => {}} />);
+
+    const row = await screen.findByTestId("shortcut-binding-row");
+    const action = within(row).getByRole("combobox", { name: "Action" });
+    expect(
+      within(action).getByRole("option", { name: "Send current message" }),
+    ).toBeInTheDocument();
+    expect(
+      within(action).getByRole("option", { name: "Voice input · toggle recording" }),
+    ).toBeInTheDocument();
+  });
+
+  it("previews and saves the window opacity setting", async () => {
+    render(<SettingsPanel onBack={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Customization" }));
+
+    const slider = await screen.findByRole("slider", { name: /Opacity/ });
+    fireEvent.change(slider, { target: { value: "75" } });
+    expect(document.documentElement).toHaveAttribute("data-app-opacity", "75");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save appearance" }));
+    await waitFor(() => {
+      expect(setWindowOpacityMock).toHaveBeenCalledWith(75);
+    });
+    expect(document.documentElement).toHaveAttribute("data-app-opacity", "75");
   });
 });

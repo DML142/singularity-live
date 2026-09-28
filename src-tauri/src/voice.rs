@@ -38,6 +38,13 @@ pub enum AudioInputSource {
     SystemAudio,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioInputDevice {
+    pub id: String,
+    pub label: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum VoiceInputEvent {
@@ -60,6 +67,7 @@ pub struct VoiceInputService {
 #[derive(Default)]
 struct VoiceInputState {
     source: Option<AudioInputSource>,
+    microphone_device_id: Option<String>,
     session: Option<VoiceInputSession>,
 }
 
@@ -84,7 +92,11 @@ impl VoiceInputService {
     /// # Errors
     ///
     /// Returns [`VoiceInputError::Busy`] when voice capture is active.
-    pub async fn set_source(&self, source: AudioInputSource) -> Result<(), VoiceInputError> {
+    pub async fn set_source(
+        &self,
+        source: AudioInputSource,
+        microphone_device_id: Option<String>,
+    ) -> Result<(), VoiceInputError> {
         let mut state = self.state.lock().await;
         if state
             .session
@@ -94,6 +106,7 @@ impl VoiceInputService {
             return Err(VoiceInputError::Busy);
         }
         state.source = Some(source);
+        state.microphone_device_id = microphone_device_id;
         Ok(())
     }
 
@@ -103,7 +116,11 @@ impl VoiceInputService {
     ///
     /// Returns an error when a session is active, no API key is configured, or the
     /// transcription service cannot be reached.
-    pub async fn start(&self, source: AudioInputSource) -> Result<(), VoiceInputError> {
+    pub async fn start(
+        &self,
+        source: AudioInputSource,
+        microphone_device_id: Option<String>,
+    ) -> Result<(), VoiceInputError> {
         let mut state = self.state.lock().await;
         if state
             .session
@@ -134,9 +151,15 @@ impl VoiceInputService {
         let stop = CancellationToken::new();
         let active = Arc::new(AtomicBool::new(true));
         let source_for_task = source;
+        let device_for_task = microphone_device_id.clone();
         let capture_stop = stop.clone();
         let capture_task = tokio::task::spawn_blocking(move || {
-            capture_audio(source_for_task, &audio_sender, &capture_stop)
+            capture_audio(
+                source_for_task,
+                device_for_task.as_deref(),
+                &audio_sender,
+                &capture_stop,
+            )
         });
         let events = Arc::clone(&self.events);
         let task_active = Arc::clone(&active);
@@ -154,6 +177,7 @@ impl VoiceInputService {
             .await;
         });
         state.source = Some(source);
+        state.microphone_device_id = microphone_device_id;
         state.session = Some(VoiceInputSession { active, stop, task });
         Ok(())
     }
@@ -167,7 +191,7 @@ impl VoiceInputService {
     }
 
     pub async fn toggle(&self) {
-        let source = {
+        let (source, microphone_device_id) = {
             let state = self.state.lock().await;
             if state
                 .session
@@ -178,14 +202,69 @@ impl VoiceInputService {
                 self.stop().await;
                 return;
             }
-            state.source.unwrap_or(AudioInputSource::Microphone)
+            (
+                state.source.unwrap_or(AudioInputSource::Microphone),
+                state.microphone_device_id.clone(),
+            )
         };
-        if let Err(error) = self.start(source).await {
+        if let Err(error) = self.start(source, microphone_device_id).await {
             self.events.emit(VoiceInputEvent::Failed {
                 message: error.safe_message().to_owned(),
             });
         }
     }
+}
+
+/// Lists active microphone endpoints supported by the current platform.
+///
+/// # Errors
+///
+/// Returns [`VoiceInputError::Unavailable`] when Windows audio endpoint enumeration fails.
+#[cfg(target_os = "windows")]
+pub fn list_audio_input_devices() -> Result<Vec<AudioInputDevice>, VoiceInputError> {
+    list_windows_audio_input_devices()
+}
+
+/// Lists active microphone endpoints supported by the current platform.
+///
+/// # Errors
+///
+/// This implementation currently cannot fail on unsupported platforms.
+#[cfg(not(target_os = "windows"))]
+pub fn list_audio_input_devices() -> Result<Vec<AudioInputDevice>, VoiceInputError> {
+    Ok(Vec::new())
+}
+
+#[cfg(target_os = "windows")]
+fn list_windows_audio_input_devices() -> Result<Vec<AudioInputDevice>, VoiceInputError> {
+    use wasapi::{DeviceEnumerator, Direction, initialize_mta};
+
+    initialize_mta()
+        .ok()
+        .map_err(|_| VoiceInputError::Unavailable)?;
+    let result = (|| {
+        let enumerator = DeviceEnumerator::new().map_err(|_| VoiceInputError::Unavailable)?;
+        let collection = enumerator
+            .get_device_collection(&Direction::Capture)
+            .map_err(|_| VoiceInputError::Unavailable)?;
+        let count = collection
+            .get_nbr_devices()
+            .map_err(|_| VoiceInputError::Unavailable)?;
+        (0..count)
+            .map(|index| {
+                let device = collection
+                    .get_device_at_index(index)
+                    .map_err(|_| VoiceInputError::Unavailable)?;
+                let id = device.get_id().map_err(|_| VoiceInputError::Unavailable)?;
+                let label = device
+                    .get_friendlyname()
+                    .map_err(|_| VoiceInputError::Unavailable)?;
+                Ok(AudioInputDevice { id, label })
+            })
+            .collect()
+    })();
+    wasapi::deinitialize();
+    result
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -501,6 +580,7 @@ impl CaptureError {
 #[cfg(target_os = "windows")]
 fn capture_audio(
     source: AudioInputSource,
+    microphone_device_id: Option<&str>,
     sender: &mpsc::Sender<AudioMessage>,
     stop: &CancellationToken,
 ) -> Result<(), CaptureError> {
@@ -515,9 +595,30 @@ fn capture_audio(
             AudioInputSource::Microphone => Direction::Capture,
             AudioInputSource::SystemAudio => Direction::Render,
         };
-        let device = enumerator
-            .get_default_device(&device_direction)
-            .map_err(|_| CaptureError::Unavailable)?;
+        let device = match (source, microphone_device_id) {
+            (AudioInputSource::Microphone, Some(device_id)) => {
+                let devices = enumerator
+                    .get_device_collection(&Direction::Capture)
+                    .map_err(|_| CaptureError::Unavailable)?;
+                let count = devices
+                    .get_nbr_devices()
+                    .map_err(|_| CaptureError::Unavailable)?;
+                let mut selected = None;
+                for index in 0..count {
+                    let candidate = devices
+                        .get_device_at_index(index)
+                        .map_err(|_| CaptureError::Unavailable)?;
+                    if candidate.get_id().map_err(|_| CaptureError::Unavailable)? == device_id {
+                        selected = Some(candidate);
+                        break;
+                    }
+                }
+                selected.ok_or(CaptureError::Unavailable)?
+            }
+            _ => enumerator
+                .get_default_device(&device_direction)
+                .map_err(|_| CaptureError::Unavailable)?,
+        };
         let mut client = device
             .get_iaudioclient()
             .map_err(|_| CaptureError::Unavailable)?;
@@ -585,6 +686,7 @@ fn capture_audio(
 #[cfg(not(target_os = "windows"))]
 fn capture_audio(
     _source: AudioInputSource,
+    _microphone_device_id: Option<&str>,
     sender: &mpsc::Sender<AudioMessage>,
     _stop: &CancellationToken,
 ) -> Result<(), CaptureError> {

@@ -11,6 +11,7 @@ import remarkGfm from "remark-gfm";
 
 import { WorkspacePanel } from "../../components/ui/WorkspacePanel";
 import type { CropRect } from "../../lib/tauri/screen-assistance-client";
+import { subscribeQuickSend } from "../../lib/tauri/shortcut-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
 import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
 import { useVoiceInputStore } from "../../stores/voice-input-store";
@@ -58,9 +59,13 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   );
   const voicePhase = useVoiceInputStore((state) => state.phase);
   const voiceSource = useVoiceInputStore((state) => state.source);
+  const voiceDevices = useVoiceInputStore((state) => state.devices);
+  const microphoneDeviceId = useVoiceInputStore((state) => state.microphoneDeviceId);
+  const voiceTranscript = useVoiceInputStore((state) => state.transcript);
   const voiceError = useVoiceInputStore((state) => state.error);
   const finalizedTranscript = useVoiceInputStore((state) => state.finalizedTranscript);
   const setVoiceSource = useVoiceInputStore((state) => state.setSource);
+  const loadVoiceDevices = useVoiceInputStore((state) => state.loadDevices);
   const startVoiceInput = useVoiceInputStore((state) => state.start);
   const stopVoiceInput = useVoiceInputStore((state) => state.stop);
   const clearFinalizedTranscript = useVoiceInputStore(
@@ -68,6 +73,7 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   );
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const quickSendHandler = useRef<() => void>(() => {});
   const screenAssistanceRef = useRef<HTMLElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const screenshotImageRef = useRef<HTMLImageElement>(null);
@@ -144,7 +150,13 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
         : `${text.trim()}\n${finalizedTranscript.text}`;
 
   const submitPrompt = (prompt: string) => {
-    if (prompt.trim().length > 0) {
+    if (
+      prompt.trim().length > 0 &&
+      readiness.phase === "ready" &&
+      phase !== "starting" &&
+      phase !== "streaming" &&
+      !resetPending
+    ) {
       stickToBottom.current = true;
       setText("");
       if (finalizedTranscript !== null) {
@@ -168,6 +180,32 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
       submitPrompt(draftText);
     }
   };
+
+  useEffect(() => {
+    quickSendHandler.current = () => {
+      submitPrompt(draftText);
+    };
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+    void subscribeQuickSend(() => {
+      quickSendHandler.current();
+    })
+      .then((stopListening) => {
+        if (mounted) {
+          unlisten = stopListening;
+        } else {
+          stopListening();
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, []);
 
   const busy = phase === "starting" || phase === "streaming";
   const hasPriorConversation = turns.some((turn) => turn.phase === "completed");
@@ -252,8 +290,8 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
             <div>
               <p className="screen-assistance-title">Voice input · Soniox</p>
               <p className="screen-assistance-copy">
-                Transcribed speech appears in the composer for review. Sending stays
-                manual.
+                Toggle recording to dictate. Review the transcript in the composer
+                before sending.
               </p>
             </div>
           </div>
@@ -274,13 +312,59 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
                   event.currentTarget.value === "microphone" ||
                   event.currentTarget.value === "system_audio"
                 ) {
-                  void setVoiceSource(event.currentTarget.value);
+                  void setVoiceSource(event.currentTarget.value, microphoneDeviceId);
                 }
               }}
             >
               <option value="microphone">Microphone</option>
               <option value="system_audio">System audio</option>
             </select>
+            {voiceSource === "microphone" ? (
+              <>
+                <label className="sr-only" htmlFor="voice-microphone-device">
+                  Microphone device
+                </label>
+                <select
+                  id="voice-microphone-device"
+                  aria-label="Microphone device"
+                  value={microphoneDeviceId ?? ""}
+                  disabled={
+                    voicePhase === "connecting" ||
+                    voicePhase === "recording" ||
+                    voicePhase === "stopping"
+                  }
+                  onChange={(event) => {
+                    void setVoiceSource(
+                      "microphone",
+                      event.currentTarget.value.length > 0
+                        ? event.currentTarget.value
+                        : null,
+                    );
+                  }}
+                >
+                  <option value="">Default microphone</option>
+                  {voiceDevices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="screen-secondary-action"
+                  type="button"
+                  onClick={() => void loadVoiceDevices()}
+                  disabled={
+                    voicePhase === "connecting" ||
+                    voicePhase === "recording" ||
+                    voicePhase === "stopping"
+                  }
+                  aria-label="Refresh microphone list"
+                  title="Refresh microphone list"
+                >
+                  ↻
+                </button>
+              </>
+            ) : null}
             <button
               className="screen-capture-action"
               type="button"
@@ -303,7 +387,7 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
             </button>
             {voicePhase === "recording" ? (
               <span className="screen-permission-hint" role="status">
-                Voice input active
+                {voiceTranscript.length > 0 ? voiceTranscript : "Listening…"}
               </span>
             ) : null}
           </div>

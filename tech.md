@@ -128,7 +128,11 @@ React owns:
   capture, temporary preview/crop, and separate send or discard actions;
 - explicit shortcut-binding edits and chord recording, plus hotkey-capture preview/error
   presentation;
-- voice-source selection, live transcript presentation, and composer insertion after stop;
+- voice-source and microphone-device selection, compact live transcript presentation above
+  the conversation, and composer insertion after stop;
+- global quick-send activation that submits the current composer draft while the window is
+  minimized without restoring it;
+- a persisted window-opacity preference exposed through Settings → Customization;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -148,17 +152,19 @@ Rust owns:
 - credential lookup behind the Rust `SecretStore` port;
 - filesystem and platform paths;
 - microphone, system-audio loopback, and screen capture;
-- persistence and context loading;
-- image preprocessing, versioned shortcut settings, native shortcut registration,
-  cursor-to-monitor resolution, and capture-window lifecycle;
+- persistence and context loading, including Rust-owned customization settings;
+- image preprocessing, microphone enumeration, versioned shortcut settings, native shortcut
+  registration, cursor-to-monitor resolution, and capture-window lifecycle;
 - safe error mapping and structured technical logging.
 
 Rust exposes `get_app_status`, the manual-assistance commands, narrow screen-assistance
 commands for capability reporting, target listing, explicit capture, capture cancellation,
-crop, discard, and screenshot-assisted requests, and voice commands for source selection and
-explicit start/stop. It also exposes typed `get_shortcut_bindings` and
-`update_shortcut_bindings` commands; the global shortcut callback is native-only and
-unavailable to the webview. `SessionService` validates text, selects
+crop, discard, and screenshot-assisted requests, and voice commands for source selection,
+active microphone enumeration, and explicit start/stop. It also exposes typed
+`get_shortcut_bindings`, `update_shortcut_bindings`, `get_window_opacity`, and
+`set_window_opacity` commands. The native shortcut callback dispatches Screenshot and Voice
+input directly in Rust and emits a narrow quick-send event for the mounted composer; quick
+send does not restore a minimized window. `SessionService` validates text, selects
 relevant static context, composes bounded system and role-tagged conversation messages,
 summarizes older completed turns through the existing router when limits require it, permits
 one active request, and returns typed failures. Capture, image processing, provider
@@ -180,7 +186,8 @@ the main window receives application and manual-assistance permissions, the scre
 `start_screen_capture`, `cancel_screen_capture`, `crop_screen_capture`,
 `discard_screen_capture`, and `start_screenshot_assistance`, and the shortcut settings
 commands `get_shortcut_bindings` and `update_shortcut_bindings`, plus `set_voice_input_source`,
-`start_voice_input`, and `stop_voice_input`. It also receives
+`list_audio_input_devices`, `start_voice_input`, `stop_voice_input`, `get_window_opacity`, and
+`set_window_opacity`. It also receives
 `core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
 permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
 logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
@@ -287,17 +294,18 @@ session remains volatile and in memory.
 ## 13. Audio and transcription
 
 The implemented flow is `AudioSource → local energy gate → Soniox WebSocket → live transcript
-→ editable composer`. Creators can choose the default microphone for commentary or Windows
-system-audio loopback for a co-host or game conversation. WASAPI runs in Rust on a blocking
-worker and requests 16 kHz mono PCM. Other platforms report the audio source unavailable.
+→ editable composer`. Creators can choose Windows system-audio loopback for a co-host or game
+conversation, or select any active microphone endpoint by its Windows device name. The default
+microphone remains an option. WASAPI enumerates and captures devices in Rust on blocking
+workers and requests 16 kHz mono PCM. Other platforms report the audio source unavailable.
 
 A local RMS energy gate keeps a short pre-roll and speech tail, and drops sustained silence
 before it reaches the network. Soniox `stt-rt-v5` receives speech frames, a keepalive during
 long pauses, Russian/Ukrainian/English language hints, common programming terms, and endpoint
-detection for pauses between phrases. Start and stop are explicit through a global Voice input
-shortcut or visible control. The finalized transcript is inserted into the composer for review
-and editing; the user separately sends it to text generation. Assistant output remains text
-only.
+detection for pauses between phrases. A global Voice input shortcut or the fixed chat toolbar
+toggles recording on and off. The live transcript appears in that compact toolbar; the
+finalized transcript is inserted into the composer for review and editing, and the user
+separately sends it to text generation. Assistant output remains text only.
 
 Raw PCM exists only in the capture-to-WebSocket buffer and is discarded; audio and transcripts
 are not written to disk or session history. The current implementation has no reconnect flow
@@ -461,25 +469,27 @@ live provider requests nor real screen captures.
 global shortcuts while the application is running.
 
 **Scope:** Rust-owned shortcut registration and versioned non-secret bind settings; a Binds
-view for recording, clearing, adding, removing, and saving screenshot and voice-input
-shortcuts; monitor-under-pointer capture on native desktops and the existing consent-driven
-source picker on Wayland; always-on-top hide/capture/restore coordination; and an optional
-development launcher.
+view for recording, clearing, adding, removing, and saving screenshot, voice-input toggle, and
+quick-send shortcuts; quick send of the current composer draft without restoring a minimized
+window; monitor-under-pointer capture on native desktops and the existing consent-driven source
+picker on Wayland; always-on-top hide/capture/restore coordination; and an optional development
+launcher.
 
 **Out of scope:** OCR, persistent screenshot data, stored API keys, tray or launch-at-login
-behavior, and actions other than Screenshot and Voice input.
+behavior, and actions other than Screenshot, Voice input, and Quick send.
 
-**Acceptance criteria:** Global capture works while the app is active or minimized; the app is
-hidden from this app's own screenshot and returns above other windows; binding edits validate
-and roll back safely; preview remains temporary and is sent only by explicit user action; the
-dev launcher does not echo or persist credentials; automated tests pass; and manual desktop
-smoke checks pass on supported operating systems.
+**Acceptance criteria:** Screenshot, voice toggle, and quick send work while the app is active
+or minimized; quick send uses the current composer draft and leaves the window minimized; the
+app is hidden from this app's own screenshot and returns above other windows; binding edits
+validate and roll back safely; preview remains temporary and is sent only by explicit user
+action; the dev launcher does not echo or persist credentials; automated tests pass; and manual
+desktop smoke checks pass on supported operating systems.
 
 **Status:** In progress — implementation and automated validation are complete. Manual desktop
-smoke checks for active/minimized activation, always-on-top restore, capture without
-self-inclusion, and platform permission flows have not yet been recorded. Voice shortcut
-activation is covered by the Rust registration boundary; real global-key smoke checks remain
-pending.
+smoke checks for active/minimized activation, quick send while minimized, always-on-top
+restore, capture without self-inclusion, and platform permission flows have not yet been
+recorded. Voice and quick-send actions are covered by the Rust registration boundary; real
+global-key smoke checks remain pending.
 
 ### Phase 2.6 — Broadcast capture protection
 
@@ -508,10 +518,11 @@ yet been recorded.
 **Goal:** Give creators low-latency voice input from their microphone or supported system
 audio, including a co-host's speech, and turn it into editable text for the assistant.
 
-**Scope:** Explicit start/stop voice-input shortcut, audio-source selection, Windows loopback
-and microphone capture, local energy gate, Soniox `stt-rt-v5`, transcript review and composer
-integration, and latency metrics. The creator sends the transcript as text after review;
-generated responses stay text-only.
+**Scope:** Explicit start/stop voice-input shortcut, audio-source and per-microphone selection,
+Windows loopback and microphone capture, local energy gate, Soniox `stt-rt-v5`, live transcript
+presentation in the fixed chat toolbar, transcript review and composer integration, and latency
+metrics. The creator sends the transcript as text after review; generated responses stay
+text-only.
 
 **Out of scope:** Permanent recording, cloud silence detection, and advanced session routing.
 
@@ -625,12 +636,15 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 - Rust-only platform capture adapters, bounded image preparation, a five-minute transient
   image store, request-scoped image parts through the provider-neutral router, and OpenRouter
   and Gemini image mappings that preserve text-only request compatibility.
-- Versioned non-secret screenshot and voice-input shortcut bindings, transactional native
+- Versioned screenshot, voice-input, and quick-send shortcut bindings, transactional native
   shortcut registration and Wayland portal integration, monitor-under-pointer capture
   coordination, an always-on-top window lifecycle, and Settings → Binds.
 - Rust-owned Soniox real-time speech transcription, a local RMS energy gate, Windows
-  microphone and system-audio capture through WASAPI, live transcript display, and explicit
-  insertion into the composer after stopping.
+  microphone enumeration and selection plus system-audio capture through WASAPI, a compact live
+  transcript in the fixed chat toolbar, and explicit insertion into the composer after stopping.
+- A full-width chat layout without the Session sidebar or separate Transcript panel, fixed
+  voice and screenshot controls above the scrolling conversation, and Settings → Customization
+  with a Rust-persisted, adjustable app-window opacity.
 - Direct OpenAI GPT-6 Luna text and screenshot streaming alongside the OpenRouter and Gemini
   adapters; OpenAI, Soniox, Gemini, and OpenRouter keys stay in the desktop environment.
 - Windows-specific Tauri `contentProtected` configuration for the main window. Its behavior
@@ -731,6 +745,20 @@ smoke checks remain pending until the user supplies credentials and tries the fe
 | Live GPT-6 Luna text and image call  | Not run; requires the user's OpenAI API key                                                                           |
 | Soniox microphone/system-audio smoke | Not run; requires the user's Soniox API key and Windows audio devices                                                 |
 
+### Chat toolbar, shortcuts, microphone selection, and appearance validation
+
+The update removes the Session rail and separate Transcript panel. Voice and screenshot
+controls sit above the independently scrolling conversation. Global quick send sends the
+current composer draft without restoring the window. Windows microphone choices are
+enumerated in Rust, and app opacity is stored in the Rust-owned customization file.
+
+| Check                                               | Result                                                                                                                                    |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Full project `pnpm check`                           | Passed on 2026-09-28: formatting, lint, TypeScript, 53 frontend tests, production build, Rust fmt/Clippy, 122 Rust tests, and Cargo check |
+| Real microphone selection and Soniox transcription  | Not run; requires a live Windows audio device and the user's Soniox API key                                                               |
+| Minimized quick-send and global shortcut activation | Not run in the native desktop window                                                                                                      |
+| Windows transparency and capture protection         | Configured; visual transparency and OBS capture smoke checks remain pending                                                               |
+
 ### Screen assistance validation record
 
 All provider-facing tests use local mock HTTP responses or a fake Rust router. The run did
@@ -772,6 +800,7 @@ current stable compatible direct versions:
 - [ADR 0007: Direct Gemini generation for text and screenshots](docs/adr/0007-gemini-generation.md)
 - [ADR 0008: Windows broadcast capture protection](docs/adr/0008-windows-broadcast-capture-protection.md)
 - [ADR 0009: OpenAI generation and Soniox voice transcription](docs/adr/0009-openai-soniox-providers.md)
+- [ADR 0010: Transparent window opacity customization](docs/adr/0010-transparent-window-opacity.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform

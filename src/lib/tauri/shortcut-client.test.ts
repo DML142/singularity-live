@@ -56,6 +56,19 @@ describe("shortcut settings IPC client", () => {
     );
   });
 
+  it("accepts quick-send bindings returned by Rust", async () => {
+    const quickSendView: ShortcutBindingView = {
+      ...bindingView,
+      binding: { ...bindingView.binding, action: "quick_send", chord: null },
+      registration: { status: "unbound" },
+    };
+    invokeMock.mockResolvedValue([quickSendView]);
+
+    await expect(updateShortcutBindings([quickSendView.binding])).resolves.toEqual([
+      quickSendView,
+    ]);
+  });
+
   it("displays the platform-equivalent Super key label", () => {
     const chord = bindingView.binding.chord;
     expect(chord).not.toBeNull();

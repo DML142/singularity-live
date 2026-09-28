@@ -296,6 +296,7 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
                 let description = match request.action {
                     ShortcutAction::Screenshot => "Capture the current screen",
                     ShortcutAction::VoiceInput => "Toggle voice input",
+                    ShortcutAction::QuickSend => "Send the current assistant message",
                 };
                 NewShortcut::new(&request.binding_id, description)
                     .preferred_trigger(Some(request.preferred_trigger.as_str()))

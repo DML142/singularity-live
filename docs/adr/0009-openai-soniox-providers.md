@@ -24,11 +24,13 @@ transcription. Assistant replies are text only.
 - Keep `OPENAI_API_KEY` and `SONIOX_API_KEY` in the desktop process environment. The
   development launcher accepts them through hidden input and passes them only to the child
   process. React and Tauri IPC never receive provider keys.
-- Capture microphone or Windows system-audio loopback in Rust through WASAPI. A local RMS
-  energy gate keeps a short pre-roll and speech tail and discards sustained silence before
-  audio leaves the machine.
-- Show live transcription in the transcript panel. On stop, insert the finalized text into
-  the editable composer. Text generation remains a separate explicit user action.
+- Capture a user-selected active microphone endpoint or Windows system-audio loopback in Rust
+  through WASAPI. Enumerate available microphone endpoints in Rust and return only their IDs
+  and display names to the UI. A local RMS energy gate keeps a short pre-roll and speech tail
+  and discards sustained silence before audio leaves the machine.
+- Show the live transcript in a compact fixed toolbar above the chat. On stop, insert the
+  finalized text into the editable composer. Text generation remains a separate explicit user
+  action.
 - Discard raw audio after streaming it. Do not persist audio or transcripts as session
   history.
 
@@ -45,8 +47,8 @@ transcription. Assistant replies are text only.
 ## Consequences
 
 The app now has independent generation and transcription providers with distinct keys and
-typed Rust boundaries. The initial capture adapter supports microphone and default render
-loopback on Windows; other platforms report voice capture as unavailable. Silence is gated by
-local RMS energy, which may need threshold tuning for quiet microphones or noisy environments.
-The app has not yet been verified with live provider keys or real audio devices. Reconnection
-and measured latency remain follow-up work.
+typed Rust boundaries. The capture adapter supports a selected active microphone or default
+render loopback on Windows; other platforms report voice capture as unavailable. Silence is
+gated by local RMS energy, which may need threshold tuning for quiet microphones or noisy
+environments. The app has not yet been verified with live provider keys or real audio devices.
+Reconnection and measured latency remain follow-up work.

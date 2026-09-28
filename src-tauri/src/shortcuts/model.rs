@@ -39,6 +39,7 @@ impl ShortcutPlatform {
 pub enum ShortcutAction {
     Screenshot,
     VoiceInput,
+    QuickSend,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -230,10 +231,11 @@ impl ShortcutBindings {
             modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Super],
             key: ShortcutKey("KeyP".to_owned()),
         };
-        vec![ShortcutBinding::new(
-            ShortcutAction::Screenshot,
-            Some(default_chord),
-        )]
+        vec![
+            ShortcutBinding::new(ShortcutAction::Screenshot, Some(default_chord)),
+            ShortcutBinding::new(ShortcutAction::VoiceInput, None),
+            ShortcutBinding::new(ShortcutAction::QuickSend, None),
+        ]
     }
 }
 

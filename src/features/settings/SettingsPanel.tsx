@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
+import {
+  DEFAULT_WINDOW_OPACITY,
+  getWindowOpacity,
+  setWindowOpacity,
+} from "../../lib/tauri/customization-client";
 import {
   formatShortcutChord,
   getShortcutBindings,
@@ -17,6 +22,7 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ onBack }: SettingsPanelProps) {
+  const [activeTab, setActiveTab] = useState<"binds" | "customization">("binds");
   const [views, setViews] = useState<readonly ShortcutBindingView[]>([]);
   const [drafts, setDrafts] = useState<readonly ShortcutBinding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,10 +135,13 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
       <header className="settings-heading">
         <div>
           <p className="settings-eyebrow">Settings</p>
-          <h2 id="settings-heading">Binds</h2>
+          <h2 id="settings-heading">
+            {activeTab === "binds" ? "Binds" : "Customization"}
+          </h2>
           <p className="settings-description">
-            Configure screenshot capture and voice input shortcuts. Changes take effect
-            after saving.
+            {activeTab === "binds"
+              ? "Configure screenshot capture, voice input, and quick send shortcuts. Changes take effect after saving."
+              : "Adjust how much of your desktop shows through the assistant window."}
           </p>
         </div>
         <button className="settings-back-button" type="button" onClick={onBack}>
@@ -141,17 +150,46 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
       </header>
 
       <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button className="settings-tab" type="button" role="tab" aria-selected="true">
+        <button
+          className="settings-tab"
+          type="button"
+          role="tab"
+          id="settings-tab-binds"
+          aria-controls="settings-panel-binds"
+          aria-selected={activeTab === "binds"}
+          onClick={() => {
+            setActiveTab("binds");
+          }}
+        >
           Binds
+        </button>
+        <button
+          className="settings-tab"
+          type="button"
+          role="tab"
+          id="settings-tab-customization"
+          aria-controls="settings-panel-customization"
+          aria-selected={activeTab === "customization"}
+          onClick={() => {
+            setActiveTab("customization");
+          }}
+        >
+          Customization
         </button>
       </div>
 
-      {loading ? (
+      {activeTab === "customization" ? (
+        <CustomizationSettings />
+      ) : loading ? (
         <p className="settings-status" role="status">
           Loading shortcut bindings…
         </p>
       ) : (
-        <>
+        <div
+          id="settings-panel-binds"
+          role="tabpanel"
+          aria-labelledby="settings-tab-binds"
+        >
           {error !== null && (
             <p className="settings-error" role="alert">
               {error}
@@ -196,14 +234,18 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                       onChange={(event) => {
                         if (
                           event.currentTarget.value === "screenshot" ||
-                          event.currentTarget.value === "voice_input"
+                          event.currentTarget.value === "voice_input" ||
+                          event.currentTarget.value === "quick_send"
                         ) {
                           updateAction(binding.id, event.currentTarget.value);
                         }
                       }}
                     >
                       <option value="screenshot">Screenshot</option>
-                      <option value="voice_input">Voice input</option>
+                      <option value="voice_input">
+                        Voice input · toggle recording
+                      </option>
+                      <option value="quick_send">Send current message</option>
                     </select>
                   </label>
                   <div className="shortcut-chord-controls">
@@ -281,9 +323,118 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
               {saving ? "Saving…" : "Save bindings"}
             </button>
           </footer>
-        </>
+        </div>
       )}
     </section>
+  );
+}
+
+function CustomizationSettings() {
+  const [opacity, setOpacity] = useState(DEFAULT_WINDOW_OPACITY);
+  const [savedOpacity, setSavedOpacity] = useState(DEFAULT_WINDOW_OPACITY);
+  const [loadingOpacity, setLoadingOpacity] = useState(true);
+  const [savingOpacity, setSavingOpacity] = useState(false);
+  const [opacityError, setOpacityError] = useState<string | null>(null);
+  const savedOpacityRef = useRef(DEFAULT_WINDOW_OPACITY);
+
+  useEffect(() => {
+    let active = true;
+    void getWindowOpacity()
+      .then((value) => {
+        if (active) {
+          setOpacity(value);
+          setSavedOpacity(value);
+          savedOpacityRef.current = value;
+          document.documentElement.dataset.appOpacity = String(value);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setOpacityError("Window appearance settings could not be loaded");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingOpacity(false);
+        }
+      });
+    return () => {
+      active = false;
+      document.documentElement.dataset.appOpacity = String(savedOpacityRef.current);
+    };
+  }, []);
+
+  async function saveOpacity(): Promise<void> {
+    setSavingOpacity(true);
+    setOpacityError(null);
+    try {
+      const saved = await setWindowOpacity(opacity);
+      setOpacity(saved);
+      setSavedOpacity(saved);
+      savedOpacityRef.current = saved;
+      document.documentElement.dataset.appOpacity = String(saved);
+    } catch {
+      setOpacityError("Window appearance settings could not be saved");
+      document.documentElement.dataset.appOpacity = String(savedOpacityRef.current);
+      setOpacity(savedOpacityRef.current);
+    } finally {
+      setSavingOpacity(false);
+    }
+  }
+
+  return (
+    <div
+      id="settings-panel-customization"
+      className="customization-panel"
+      role="tabpanel"
+      aria-labelledby="settings-tab-customization"
+    >
+      <section className="customization-card" aria-labelledby="opacity-heading">
+        <div>
+          <h3 id="opacity-heading">Window opacity</h3>
+          <p className="settings-description">
+            Lower opacity lets you see more of the desktop behind the assistant.
+          </p>
+        </div>
+        <label className="opacity-control" htmlFor="window-opacity">
+          <span>Opacity</span>
+          <output htmlFor="window-opacity">{opacity}%</output>
+          <input
+            id="window-opacity"
+            type="range"
+            min="40"
+            max="100"
+            step="5"
+            value={opacity}
+            disabled={loadingOpacity || savingOpacity}
+            onChange={(event) => {
+              const next = Number(event.currentTarget.value);
+              setOpacity(next);
+              document.documentElement.dataset.appOpacity = String(next);
+            }}
+          />
+          <span className="opacity-range-labels">
+            <span>More transparent</span>
+            <span>More opaque</span>
+          </span>
+        </label>
+        {opacityError !== null ? (
+          <p className="settings-error" role="alert">
+            {opacityError}
+          </p>
+        ) : null}
+        <footer className="settings-footer">
+          <button
+            className="settings-save-button"
+            type="button"
+            onClick={() => void saveOpacity()}
+            disabled={loadingOpacity || savingOpacity || opacity === savedOpacity}
+          >
+            {savingOpacity ? "Saving…" : "Save appearance"}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

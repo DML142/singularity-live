@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AssistantPanel } from "../features/assistant/AssistantPanel";
-import { SessionPanel } from "../features/session/SessionPanel";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
-import { TranscriptPanel } from "../features/transcript/TranscriptPanel";
+import { getWindowOpacity } from "../lib/tauri/customization-client";
 import { useApplicationStatusStore } from "../stores/application-status-store";
 import { useScreenAssistanceStore } from "../stores/screen-assistance-store";
 import { listenForHotkeyCapture } from "../lib/tauri/hotkey-capture-client";
@@ -29,6 +28,24 @@ export function App() {
   useEffect(() => {
     void loadStatus();
   }, [loadStatus]);
+
+  useEffect(() => {
+    let active = true;
+    void getWindowOpacity()
+      .then((opacity) => {
+        if (active) {
+          document.documentElement.dataset.appOpacity = String(opacity);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          document.documentElement.dataset.appOpacity = "100";
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -101,21 +118,18 @@ export function App() {
         </div>
       </header>
 
+      <div className="workspace" hidden={settingsOpen} aria-hidden={settingsOpen}>
+        <div className="workspace-main">
+          <AssistantPanel initialTask={devAssistTask} />
+        </div>
+      </div>
       {settingsOpen ? (
         <SettingsPanel
           onBack={() => {
             setSettingsOpen(false);
           }}
         />
-      ) : (
-        <div className="workspace">
-          <SessionPanel />
-          <div className="workspace-main">
-            <TranscriptPanel />
-            <AssistantPanel initialTask={devAssistTask} />
-          </div>
-        </div>
-      )}
+      ) : null}
     </main>
   );
 }

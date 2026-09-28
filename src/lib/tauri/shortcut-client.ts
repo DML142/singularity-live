@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MODIFIERS = ["control", "alt", "shift", "super"] as const;
 
 export type ShortcutModifier = (typeof MODIFIERS)[number];
-export type ShortcutAction = "screenshot" | "voice_input";
+export type ShortcutAction = "screenshot" | "voice_input" | "quick_send";
 
 export interface ShortcutChord {
   readonly modifiers: readonly ShortcutModifier[];
@@ -132,9 +133,17 @@ function isShortcutBinding(value: unknown): value is ShortcutBinding {
     isRecord(value) &&
     hasExactKeys(value, ["id", "action", "chord"]) &&
     isUuid(value.id) &&
-    (value.action === "screenshot" || value.action === "voice_input") &&
+    (value.action === "screenshot" ||
+      value.action === "voice_input" ||
+      value.action === "quick_send") &&
     (value.chord === null || isShortcutChord(value.chord))
   );
+}
+
+export async function subscribeQuickSend(onQuickSend: () => void): Promise<() => void> {
+  return listen<unknown>("singularity:quick-send", () => {
+    onQuickSend();
+  });
 }
 
 function isShortcutChord(value: unknown): value is ShortcutChord {

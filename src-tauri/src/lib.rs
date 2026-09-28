@@ -12,7 +12,7 @@ use shortcuts::{
     ShortcutAction, ShortcutBindingService, ShortcutConfigStore, ShortcutPlatform,
     platform_shortcut_registrar,
 };
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use voice::{VoiceInputEvent, VoiceInputEventSink, VoiceInputService};
 
 pub mod app;
@@ -20,6 +20,7 @@ pub mod capture;
 mod commands;
 pub mod config;
 pub mod context;
+pub mod customization;
 pub mod domain;
 pub mod providers;
 pub mod secrets;
@@ -56,6 +57,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::application_status::get_app_status,
+            commands::customization::get_window_opacity,
+            commands::customization::set_window_opacity,
             commands::manual_assistance::get_manual_assistance_readiness,
             commands::manual_assistance::start_manual_assistance,
             commands::manual_assistance::cancel_manual_assistance,
@@ -70,6 +73,7 @@ pub fn run() {
             commands::shortcuts::get_shortcut_bindings,
             commands::shortcuts::update_shortcut_bindings,
             commands::voice_input::set_voice_input_source,
+            commands::voice_input::list_audio_input_devices,
             commands::voice_input::start_voice_input,
             commands::voice_input::stop_voice_input,
         ])
@@ -87,6 +91,19 @@ fn setup_application(
         )),
     };
     application.manage(Arc::clone(&service));
+    let customization = application
+        .path()
+        .app_config_dir()
+        .or_else(|_| application.path().app_data_dir())
+        .map_or_else(
+            |_| Arc::new(customization::CustomizationService::unavailable()),
+            |directory| {
+                Arc::new(customization::CustomizationService::new(
+                    directory.join("customization.json"),
+                ))
+            },
+        );
+    application.manage(customization);
     let voice_input = Arc::new(VoiceInputService::new(
         Arc::new(EnvironmentSecretStore),
         Arc::new(TauriVoiceInputEventSink(application.handle().clone())),
@@ -126,6 +143,7 @@ fn setup_application(
         );
     let shortcut_coordinator = Arc::clone(&coordinator);
     let shortcut_voice_input = Arc::clone(&voice_input);
+    let shortcut_application = application.handle().clone();
     let activation = Arc::new(move |action| match action {
         ShortcutAction::Screenshot => {
             let coordinator = Arc::clone(&shortcut_coordinator);
@@ -138,6 +156,9 @@ fn setup_application(
             tauri::async_runtime::spawn(async move {
                 voice_input.toggle().await;
             });
+        }
+        ShortcutAction::QuickSend => {
+            let _ = shortcut_application.emit("singularity:quick-send", ());
         }
     });
     let registrar = platform_shortcut_registrar(application.handle().clone(), activation);

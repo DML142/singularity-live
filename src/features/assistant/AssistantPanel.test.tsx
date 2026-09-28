@@ -21,6 +21,7 @@ const client = vi.hoisted(() => ({
   screenCrop: vi.fn(),
   screenDiscard: vi.fn(),
   screenshotSend: vi.fn(),
+  subscribeQuickSend: vi.fn<(callback: () => void) => Promise<() => void>>(),
 }));
 
 vi.mock("../../lib/tauri/manual-assistance-client", () => ({
@@ -43,6 +44,9 @@ vi.mock("../../lib/tauri/screen-assistance-client", () => ({
       : "Capture failed",
   startScreenCapture: client.screenCapture,
   startScreenshotAssistance: client.screenshotSend,
+}));
+vi.mock("../../lib/tauri/shortcut-client", () => ({
+  subscribeQuickSend: client.subscribeQuickSend,
 }));
 
 let receiveEvent: ((event: ManualAssistanceEvent) => void) | undefined;
@@ -69,6 +73,7 @@ describe("manual assistant panel", () => {
     client.screenCrop.mockReset();
     client.screenDiscard.mockReset();
     client.screenshotSend.mockReset();
+    client.subscribeQuickSend.mockReset().mockResolvedValue(vi.fn());
     receiveEvent = undefined;
     client.getReadiness.mockResolvedValue({
       status: "ready",
@@ -129,6 +134,8 @@ describe("manual assistant panel", () => {
     useVoiceInputStore.setState({
       phase: "idle",
       source: "microphone",
+      devices: [{ id: "usb-mic", label: "USB microphone" }],
+      microphoneDeviceId: null,
       transcript: "",
       error: null,
       finalizedTranscript: null,
@@ -220,6 +227,44 @@ describe("manual assistant panel", () => {
     });
     expect(composer).toHaveValue("");
     expect(useVoiceInputStore.getState().finalizedTranscript).toBeNull();
+  });
+
+  it("sends the current composer draft when the global quick-send action fires", async () => {
+    render(<AssistantPanel />);
+    const composer = await screen.findByRole("textbox", {
+      name: "Ask for assistance",
+    });
+    fireEvent.change(composer, { target: { value: "Send this while minimized" } });
+    await waitFor(() => {
+      expect(client.subscribeQuickSend).toHaveBeenCalled();
+    });
+    const quickSendHandler = client.subscribeQuickSend.mock.calls[0]?.[0];
+    if (quickSendHandler === undefined) {
+      throw new Error("The quick-send shortcut listener was not registered");
+    }
+
+    act(() => {
+      quickSendHandler();
+    });
+
+    await waitFor(() => {
+      expect(client.start).toHaveBeenCalledWith("Send this while minimized");
+    });
+  });
+
+  it("offers an enumerated microphone and keeps the selected device", async () => {
+    render(<AssistantPanel />);
+    const microphone = await screen.findByRole("combobox", {
+      name: "Microphone device",
+    });
+
+    expect(microphone).toHaveDisplayValue("Default microphone");
+    expect(screen.getByRole("option", { name: "USB microphone" })).toBeInTheDocument();
+    fireEvent.change(microphone, { target: { value: "usb-mic" } });
+
+    await waitFor(() => {
+      expect(useVoiceInputStore.getState().microphoneDeviceId).toBe("usb-mic");
+    });
   });
 
   it("keeps both sides of each exchange visible without sending prior turns again", async () => {

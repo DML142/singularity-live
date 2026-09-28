@@ -11,6 +11,7 @@
         "minHeight": 540,
         "alwaysOnTop": true,
         "contentProtected": true,
+        "transparent": true,
         "resizable": true,
         "fullscreen": false
       }

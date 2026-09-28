@@ -13,11 +13,11 @@ impl AtomicConfigWriter for FailingAtomicWriter {
 }
 
 #[test]
-fn defaults_to_one_screenshot_binding_with_platform_super_key() {
+fn defaults_to_screenshot_voice_and_quick_send_bindings() {
     let windows = ShortcutBindings::defaults(ShortcutPlatform::Windows);
     let macos = ShortcutBindings::defaults(ShortcutPlatform::MacOS);
 
-    assert_eq!(windows.len(), 1);
+    assert_eq!(windows.len(), 3);
     assert_eq!(windows[0].action, ShortcutAction::Screenshot);
     assert_eq!(
         windows[0].chord.as_ref().map(ShortcutChord::canonical),
@@ -27,6 +27,10 @@ fn defaults_to_one_screenshot_binding_with_platform_super_key() {
         macos[0].chord.as_ref().map(ShortcutChord::canonical),
         Some("ctrl+super+KeyP".to_owned())
     );
+    assert_eq!(windows[1].action, ShortcutAction::VoiceInput);
+    assert!(windows[1].chord.is_none());
+    assert_eq!(windows[2].action, ShortcutAction::QuickSend);
+    assert!(windows[2].chord.is_none());
 }
 
 #[test]
@@ -105,7 +109,7 @@ fn persists_versioned_bindings_and_uses_defaults_when_the_file_is_missing() {
     let store = ShortcutConfigStore::new(&path, ShortcutPlatform::Windows);
 
     let defaults = store.load().expect("missing file uses defaults");
-    assert_eq!(defaults.len(), 1);
+    assert_eq!(defaults.len(), 3);
     store.save(&defaults).expect("save bindings");
     assert_eq!(store.load().expect("load saved bindings"), defaults);
     assert_eq!(

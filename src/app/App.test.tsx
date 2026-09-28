@@ -36,14 +36,17 @@ describe("application shell", () => {
     listenMock.mockReset().mockResolvedValue(vi.fn());
   });
 
-  it("shows the real backend status and honest empty workspace states", async () => {
+  it("shows the assistant without the session or transcript side panels", async () => {
     render(<App />);
 
     expect(
       screen.getByRole("heading", { level: 1, name: "Singularity Live" }),
     ).toBeInTheDocument();
     expect(await screen.findByText("Backend ready")).toBeInTheDocument();
-    expect(screen.getByText("No active session")).toBeInTheDocument();
+    expect(screen.queryByText("No active session")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Transcript" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText(
         "Ask about the text you are working on. Relevant context is added automatically.",

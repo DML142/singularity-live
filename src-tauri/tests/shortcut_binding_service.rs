@@ -189,11 +189,22 @@ async fn startup_keeps_valid_bindings_and_reports_os_rejected_rows() {
         ShortcutRegistrationState::Registered { ref effective_trigger }
             if effective_trigger == "Control+Super+P"
     ));
+    let rejected_state = states
+        .iter()
+        .find(|state| state.binding.id == rejected.id)
+        .expect("rejected binding state");
     assert!(matches!(
-        states[1].registration,
+        rejected_state.registration,
         ShortcutRegistrationState::Failed { .. }
     ));
-    assert_eq!(registrar.active(), defaults);
+    assert_eq!(
+        registrar.active(),
+        defaults
+            .iter()
+            .filter(|binding| binding.chord.is_some())
+            .cloned()
+            .collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]
@@ -225,7 +236,14 @@ async fn rejected_update_restores_previous_runtime_bindings_and_persisted_config
         ShortcutServiceError::RegistrationRejected { .. }
     ));
     assert_eq!(store.load().expect("prior config remains"), original);
-    assert_eq!(registrar.active(), original);
+    assert_eq!(
+        registrar.active(),
+        original
+            .iter()
+            .filter(|binding| binding.chord.is_some())
+            .cloned()
+            .collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]

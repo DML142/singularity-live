@@ -2,10 +2,12 @@ import { create } from "zustand";
 
 import {
   setVoiceInputSource,
+  getAudioInputDevices,
   startVoiceInput,
   stopVoiceInput,
   subscribeVoiceInputEvents,
   type AudioInputSource,
+  type AudioInputDevice,
   type VoiceInputEvent,
 } from "../lib/tauri/voice-input-client";
 
@@ -19,11 +21,17 @@ interface FinalizedTranscript {
 interface VoiceInputState {
   readonly phase: VoiceInputPhase;
   readonly source: AudioInputSource;
+  readonly devices: readonly AudioInputDevice[];
+  readonly microphoneDeviceId: string | null;
   readonly transcript: string;
   readonly error: string | null;
   readonly finalizedTranscript: FinalizedTranscript | null;
   readonly initialize: () => Promise<() => void>;
-  readonly setSource: (source: AudioInputSource) => Promise<void>;
+  readonly loadDevices: () => Promise<void>;
+  readonly setSource: (
+    source: AudioInputSource,
+    microphoneDeviceId: string | null,
+  ) => Promise<void>;
   readonly start: () => Promise<void>;
   readonly stop: () => Promise<void>;
   readonly handleEvent: (event: VoiceInputEvent) => void;
@@ -42,25 +50,36 @@ function safeVoiceCommandError(error: unknown): string {
 export const useVoiceInputStore = create<VoiceInputState>((set, get) => ({
   phase: "idle",
   source: "microphone",
+  devices: [],
+  microphoneDeviceId: null,
   transcript: "",
   error: null,
   finalizedTranscript: null,
   initialize: async () => {
     try {
-      return await subscribeVoiceInputEvents((event) => {
+      const unlisten = await subscribeVoiceInputEvents((event) => {
         get().handleEvent(event);
       });
+      void get().loadDevices();
+      return unlisten;
     } catch {
       return () => {};
     }
   },
-  setSource: async (source) => {
+  loadDevices: async () => {
+    try {
+      set({ devices: await getAudioInputDevices() });
+    } catch {
+      set({ error: "Available microphones could not be listed" });
+    }
+  },
+  setSource: async (source, microphoneDeviceId) => {
     if (get().phase === "recording" || get().phase === "connecting") {
       return;
     }
-    set({ source, error: null });
+    set({ source, microphoneDeviceId, error: null });
     try {
-      await setVoiceInputSource(source);
+      await setVoiceInputSource(source, microphoneDeviceId);
     } catch {
       set({ error: "The selected audio source could not be saved" });
     }
@@ -69,10 +88,10 @@ export const useVoiceInputStore = create<VoiceInputState>((set, get) => ({
     if (get().phase === "connecting" || get().phase === "recording") {
       return;
     }
-    const source = get().source;
+    const { source, microphoneDeviceId } = get();
     set({ phase: "connecting", transcript: "", error: null });
     try {
-      await startVoiceInput(source);
+      await startVoiceInput(source, microphoneDeviceId);
     } catch (error) {
       set({ phase: "failed", error: safeVoiceCommandError(error) });
     }

@@ -3,18 +3,59 @@ import { listen } from "@tauri-apps/api/event";
 
 export type AudioInputSource = "microphone" | "system_audio";
 
+export interface AudioInputDevice {
+  readonly id: string;
+  readonly label: string;
+}
+
 export type VoiceInputEvent =
   | { readonly type: "started"; readonly source: AudioInputSource }
   | { readonly type: "transcript"; readonly text: string }
   | { readonly type: "stopped"; readonly transcript: string }
   | { readonly type: "failed"; readonly message: string };
 
-export async function setVoiceInputSource(source: AudioInputSource): Promise<void> {
-  await invoke("set_voice_input_source", { request: { source } });
+export async function getAudioInputDevices(): Promise<readonly AudioInputDevice[]> {
+  const response: unknown = await invoke("list_audio_input_devices");
+  if (!Array.isArray(response)) {
+    throw new Error("Invalid audio input device response");
+  }
+  const devices = response.flatMap((value): AudioInputDevice[] => {
+    if (
+      isRecord(value) &&
+      Object.keys(value).length === 2 &&
+      Object.hasOwn(value, "id") &&
+      Object.hasOwn(value, "label") &&
+      typeof value.id === "string" &&
+      value.id.length > 0 &&
+      typeof value.label === "string" &&
+      value.label.length > 0
+    ) {
+      return [{ id: value.id, label: value.label }];
+    }
+    return [];
+  });
+  if (devices.length !== response.length) {
+    throw new Error("Invalid audio input device response");
+  }
+  return devices;
 }
 
-export async function startVoiceInput(source: AudioInputSource): Promise<void> {
-  await invoke("start_voice_input", { request: { source } });
+export async function setVoiceInputSource(
+  source: AudioInputSource,
+  microphoneDeviceId: string | null,
+): Promise<void> {
+  await invoke("set_voice_input_source", {
+    request: { source, microphoneDeviceId },
+  });
+}
+
+export async function startVoiceInput(
+  source: AudioInputSource,
+  microphoneDeviceId: string | null,
+): Promise<void> {
+  await invoke("start_voice_input", {
+    request: { source, microphoneDeviceId },
+  });
 }
 
 export async function stopVoiceInput(): Promise<void> {
