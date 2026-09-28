@@ -470,8 +470,11 @@ async fn stop_capture_and_drain_audio(
             audio = audio_receiver.recv() => match audio {
                 Some(audio) => {
                     #[cfg(target_os = "windows")]
-                    if let Some(frame) = forward_audio_message(audio, failed)
-                        && writer.send(Message::Binary(frame.into())).await.is_err()
+                    if let Some(frame) = forward_audio_message(&audio, failed)
+                        && writer
+                            .send(Message::Binary(frame.to_vec().into()))
+                            .await
+                            .is_err()
                     {
                         *failed = Some("Soniox connection was interrupted".to_owned());
                     }
@@ -487,8 +490,11 @@ async fn stop_capture_and_drain_audio(
     }
     while let Some(audio) = audio_receiver.recv().await {
         #[cfg(target_os = "windows")]
-        if let Some(frame) = forward_audio_message(audio, failed)
-            && writer.send(Message::Binary(frame.into())).await.is_err()
+        if let Some(frame) = forward_audio_message(&audio, failed)
+            && writer
+                .send(Message::Binary(frame.to_vec().into()))
+                .await
+                .is_err()
         {
             *failed = Some("Soniox connection was interrupted".to_owned());
         }
@@ -499,7 +505,10 @@ async fn stop_capture_and_drain_audio(
     let _ = writer;
 }
 
-fn forward_audio_message(audio: AudioMessage, failed: &mut Option<String>) -> Option<Vec<u8>> {
+fn forward_audio_message<'a>(
+    audio: &'a AudioMessage,
+    failed: &mut Option<String>,
+) -> Option<&'a [u8]> {
     match audio {
         #[cfg(target_os = "windows")]
         AudioMessage::Frame(frame) if failed.is_none() => Some(frame),
