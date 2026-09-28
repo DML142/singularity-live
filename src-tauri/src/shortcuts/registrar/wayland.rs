@@ -338,10 +338,10 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
                         let Some(event) = event else {
                             break;
                         };
-                        if active_ids.contains(event.shortcut_id()) {
-                            if let Some(action) = action_by_id.get(event.shortcut_id()).copied() {
-                                activation(action);
-                            }
+                        if active_ids.contains(event.shortcut_id())
+                            && let Some(action) = action_by_id.get(event.shortcut_id()).copied()
+                        {
+                            activation(action);
                         }
                     }
                 }
@@ -481,7 +481,7 @@ mod tests {
             closed_sessions: Arc::new(AtomicUsize::new(0)),
         });
         let portal_port: Arc<dyn GlobalShortcutsPortal> = portal.clone();
-        let registrar = PortalShortcutRegistrar::with_portal(portal_port, Arc::new(|| {}));
+        let registrar = PortalShortcutRegistrar::with_portal(portal_port, Arc::new(|_| {}));
 
         let initial = registrar
             .register_available(std::slice::from_ref(&original))

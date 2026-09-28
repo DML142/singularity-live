@@ -23,6 +23,7 @@ use crate::secrets::{SecretName, SecretStore};
 
 const SONIOX_ENDPOINT: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
 const SONIOX_MODEL: &str = "stt-rt-v5";
+#[cfg(target_os = "windows")]
 const AUDIO_FRAME_BYTES: usize = 640;
 const SONIOX_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -415,6 +416,7 @@ async fn stream_soniox_until_stopped(
         tokio::select! {
             () = stop.cancelled() => return Ok(false),
             audio = audio_receiver.recv() => match audio {
+                #[cfg(target_os = "windows")]
                 Some(AudioMessage::Frame(frame)) => {
                     writer.send(Message::Binary(frame.into())).await
                         .map_err(|_| "Soniox connection was interrupted".to_owned())?;
@@ -484,6 +486,7 @@ async fn forward_audio_message(
     failed: &mut Option<String>,
 ) {
     match audio {
+        #[cfg(target_os = "windows")]
         AudioMessage::Frame(frame) if failed.is_none() => {
             if writer.send(Message::Binary(frame.into())).await.is_err() {
                 *failed = Some("Soniox connection was interrupted".to_owned());
@@ -492,6 +495,7 @@ async fn forward_audio_message(
         AudioMessage::Failed => {
             failed.get_or_insert_with(|| CaptureError::safe_message().to_owned());
         }
+        #[cfg(target_os = "windows")]
         AudioMessage::Frame(_) => {}
     }
 }
@@ -562,6 +566,7 @@ fn complete_text(final_text: &str, partial_text: &str) -> String {
 }
 
 enum AudioMessage {
+    #[cfg(target_os = "windows")]
     Frame(Vec<u8>),
     Failed,
 }
@@ -695,12 +700,14 @@ fn capture_audio(
 }
 
 #[derive(Default)]
+#[cfg(any(target_os = "windows", test))]
 struct VoiceActivityGate {
     pre_roll: VecDeque<Vec<u8>>,
     active: bool,
     trailing_frames: u8,
 }
 
+#[cfg(any(target_os = "windows", test))]
 impl VoiceActivityGate {
     fn push(&mut self, frame: Vec<u8>) -> Vec<Vec<u8>> {
         let speech = is_speech(&frame);
@@ -727,6 +734,7 @@ impl VoiceActivityGate {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn is_speech(frame: &[u8]) -> bool {
     let (sample_bytes, _) = frame.as_chunks::<2>();
     let mut count = 0_u64;
