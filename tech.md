@@ -850,15 +850,15 @@ This update stores API keys in an editable local settings file that remains insi
 provider/model selection in Settings, seeds the built-in example context pack on first launch,
 and builds a standalone Windows executable without an installer.
 
-| Check                             | Result                                                                                               |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Frontend typecheck and lint       | Passed on 2026-09-28                                                                                 |
-| Frontend production build         | Passed as part of `pnpm build:exe`                                                                   |
-| Rust fmt, Clippy, and Cargo check | Passed on 2026-09-28                                                                                 |
+| Check                             | Result                                                                                                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend typecheck and lint       | Passed on 2026-09-28                                                                                                                                                                                                |
+| Frontend production build         | Passed as part of `pnpm build:exe`                                                                                                                                                                                  |
+| Rust fmt, Clippy, and Cargo check | Passed on 2026-09-28                                                                                                                                                                                                |
 | Windows executable build          | Release binary compiled with the GUI subsystem and saved as `src-tauri/target/release/singularity-live-updated.exe`; the Tauri wrapper could not replace the usual output while the previous executable was running |
-| Changed-file Prettier check       | Passed                                                                                               |
-| Repository-wide Prettier check    | Reports existing formatting warnings in 8 untouched files; no unrelated formatting changes were made |
-| Automated tests                   | Not run for this update                                                                              |
+| Changed-file Prettier check       | Passed                                                                                                                                                                                                              |
+| Repository-wide Prettier check    | Reports existing formatting warnings in 8 untouched files; no unrelated formatting changes were made                                                                                                                |
+| Automated tests                   | Not run for this update                                                                                                                                                                                             |
 
 ### Toolchain and tested versions
 
