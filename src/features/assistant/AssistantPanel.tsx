@@ -72,6 +72,8 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   const screenshotButtonRef = useRef<HTMLButtonElement>(null);
   const quickSendHandler = useRef<() => void>(() => {});
   const screenshotSendHandler = useRef<() => void>(() => {});
+  const autoSendHandler = useRef<() => void>(() => {});
+  const autoSendCaptureId = useRef<string | null>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const screenshotImageRef = useRef<HTMLImageElement>(null);
   const cropStart = useRef<{ readonly x: number; readonly y: number } | null>(null);
@@ -197,6 +199,49 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
     submitPrompt(composedDraft);
   };
 
+  const tryAutoSendScreenshot = () => {
+    const currentScreen = useScreenAssistanceStore.getState();
+    const preview = currentScreen.preview;
+    if (
+      !currentScreen.sendImmediately ||
+      currentScreen.phase !== "preview" ||
+      preview === null
+    ) {
+      autoSendCaptureId.current = null;
+      return;
+    }
+    if (autoSendCaptureId.current === preview.captureId) {
+      return;
+    }
+    const currentAssistant = useManualAssistanceStore.getState();
+    if (
+      currentAssistant.readiness.phase === "loading" ||
+      currentAssistant.phase === "starting" ||
+      currentAssistant.phase === "streaming" ||
+      currentAssistant.resetPending
+    ) {
+      return;
+    }
+    if (currentAssistant.readiness.phase !== "ready") {
+      autoSendCaptureId.current = preview.captureId;
+      currentScreen.disableAutomaticSend(
+        "The screenshot was captured but not sent. Configure a provider, then send it from the preview.",
+      );
+      return;
+    }
+    autoSendCaptureId.current = preview.captureId;
+    stickToBottom.current = true;
+    setText("");
+    setContextAction(null);
+    if (finalizedTranscript !== null) {
+      clearFinalizedTranscript(finalizedTranscript.id);
+    }
+    if (composerRef.current !== null) {
+      composerRef.current.style.height = "56px";
+    }
+    void currentScreen.send(composedDraft);
+  };
+
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     sendCurrentDraft();
@@ -213,6 +258,7 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
     quickSendHandler.current = () => {
       sendCurrentDraft();
     };
+    autoSendHandler.current = tryAutoSendScreenshot;
     screenshotSendHandler.current = () => {
       const currentScreen = useScreenAssistanceStore.getState();
       const currentAssistant = useManualAssistanceStore.getState();
@@ -229,6 +275,19 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
       }
     };
   });
+
+  useEffect(() => {
+    const checkAutomaticSend = () => {
+      autoSendHandler.current();
+    };
+    const stopScreenListener = useScreenAssistanceStore.subscribe(checkAutomaticSend);
+    const stopAssistantListener =
+      useManualAssistanceStore.subscribe(checkAutomaticSend);
+    return () => {
+      stopScreenListener();
+      stopAssistantListener();
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;

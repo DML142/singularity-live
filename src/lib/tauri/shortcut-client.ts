@@ -9,6 +9,7 @@ export type ShortcutModifier = (typeof MODIFIERS)[number];
 export type ShortcutAction =
   | "screenshot"
   | "screenshot_send"
+  | "screenshot_capture_send"
   | "toggle_taskbar_icon"
   | "voice_input"
   | "toggle_audio_source"
@@ -143,6 +144,7 @@ function isShortcutBinding(value: unknown): value is ShortcutBinding {
     isUuid(value.id) &&
     (value.action === "screenshot" ||
       value.action === "screenshot_send" ||
+      value.action === "screenshot_capture_send" ||
       value.action === "toggle_taskbar_icon" ||
       value.action === "voice_input" ||
       value.action === "toggle_audio_source" ||

@@ -74,6 +74,7 @@ describe("shortcut settings IPC client", () => {
   it("accepts all built-in screenshot, audio, window, and composer actions", () => {
     const actions: readonly ShortcutAction[] = [
       "screenshot_send",
+      "screenshot_capture_send",
       "toggle_taskbar_icon",
       "toggle_audio_source",
       "toggle_click_through",
@@ -81,6 +82,7 @@ describe("shortcut settings IPC client", () => {
     ];
     expect(actions).toEqual([
       "screenshot_send",
+      "screenshot_capture_send",
       "toggle_taskbar_icon",
       "toggle_audio_source",
       "toggle_click_through",

@@ -29,11 +29,14 @@ launcher that avoids repeated shell setup without saving credentials.
   Singularity Live itself. The window is then restored, brought forward, and kept
   always-on-top with the existing screenshot preview. A capture error also restores the
   window and displays a safe error.
-- Capturing never sends automatically. The existing preview, crop, explicit send, discard,
-  and five-minute transient image lifecycle remain in effect.
+- The `Screenshot` action stops at the review preview.
+- `Capture and send screenshot` uses `Ctrl+Shift+Enter` by default and submits only after
+  capture succeeds. The existing review, crop, send, discard, and five-minute transient
+  image lifecycle remain in effect for preview-only captures.
 - Settings contain a Binds tab. There is at least one binding and no application-imposed
   maximum number of rows. A row maps one shortcut to one action; multiple rows may map to
-  the same action. `Screenshot` is the only action in this feature.
+  the same action. Actions include screenshot capture, reviewed screenshot send, and
+  capture-and-send.
 - Settings are a dedicated view in the existing main Tauri window, not a second native
   window. The view contains a Binds tab; model and credential management remain out of
   scope.
@@ -83,10 +86,11 @@ contain image or credential data.
 
 Bindings are stored in a small versioned, non-secret configuration file beneath Tauri's
 per-user application configuration directory. They are independent of the context pack and
-provider environment. The default chord is represented with the platform's equivalent
+provider environment. The Screenshot default chord is represented with the platform's equivalent
 super key: Windows displays `Ctrl + Win + P`, Linux displays `Ctrl + Super + P`, and macOS
 displays `Control + Command + P`. If no binding configuration exists, this
 platform-specific default is assigned to `Screenshot`.
+`Capture and send screenshot` defaults to `Ctrl + Shift + Enter` on every platform.
 
 The Settings view in the main window provides:
 
@@ -152,9 +156,10 @@ name are implementation details to settle in the implementation plan.
    and map several different chords to `Screenshot`.
 5. Duplicate, unsupported, or OS-conflicting chords produce a clear error without losing
    previously working bindings. Bind configuration survives application restart.
-6. Screenshot preview remains temporary, does not enter history or logs, and is not sent
-   until the existing explicit send action. Busy, cancellation, permission, and capture
-   error paths restore the window and delete transient image data.
+6. Screenshot preview remains temporary and does not enter history or logs. Preview-only
+   capture waits for the existing explicit send action; Capture and send screenshot submits
+   only after its explicit shortcut and successful capture. Busy, cancellation, permission,
+   and capture error paths restore the window and delete transient image data.
 7. The dev CLI's no-argument path offers task choices and can accept a key without echoing
    or persisting it. Supplying arguments skips prompts and requires the key in the
    environment; missing configuration fails clearly. The existing direct `pnpm tauri dev`
@@ -173,12 +178,12 @@ This follow-up does not implement audio or transcription and does not change the
 
 ## Out of scope
 
-- Background or automatic screen capture, automatic provider submission, OCR, audio,
+- Background screen capture, submission without an explicit creator action, OCR, audio,
   transcription, VAD, persistent screenshot storage, and SQLite.
 - A tray-resident process after the user exits the application, launch-at-login, and a
   separate hotkey daemon.
 - Product UI for model selection or persistent credential storage.
 - Passing API keys through command-line arguments, writing keys to `.env` or plain-text
   configuration, or sending live requests during automated checks.
-- Actions other than `Screenshot`; the action type may be extended when a later capability
-  is implemented.
+- Actions outside Screenshot, Send screenshot, Capture and send screenshot, Hide/show taskbar
+  icon, Voice input, Quick send, and Minmode.
