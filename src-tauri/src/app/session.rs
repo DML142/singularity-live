@@ -11,8 +11,8 @@ use crate::{
     capture::PreparedImage,
     context::{
         ContextPackLoader, MAX_RETAINED_ASSISTANT_BYTES, MAX_SESSION_SUMMARY_BYTES,
-        SCREENSHOT_FOLLOW_UP_PROMPT, SessionHistory, build_session_system_prompt, select_context,
-        truncate_to_bytes,
+        SCREENSHOT_FOLLOW_UP_PROMPT, SessionHistory, build_session_system_prompt,
+        load_context_documents, select_context, truncate_to_bytes,
     },
     domain::{
         CompletedResponse, ConversationMessage, ModelId, ProviderError, ProviderErrorKind,
@@ -127,6 +127,11 @@ impl SessionService {
                     runtime.context_pack_directory.display(),
                     error.safe_summary(),
                 ),
+            };
+        }
+        if load_context_documents(&runtime.context_pack_root.join("user-context.json")).is_err() {
+            return ManualAssistanceReadiness::Unconfigured {
+                message: "Saved context files could not be loaded".to_owned(),
             };
         }
         ManualAssistanceReadiness::Ready {
@@ -261,6 +266,7 @@ impl SessionService {
         }
         let context_pack_root = runtime.context_pack_root.clone();
         let context_pack_directory = runtime.context_pack_directory.clone();
+        let user_context_path = context_pack_root.join("user-context.json");
         let selection_text = if content.text == SCREENSHOT_FOLLOW_UP_PROMPT {
             history
                 .latest_user_intent()
@@ -270,9 +276,13 @@ impl SessionService {
             content.text.clone()
         };
         let context_result = tokio::task::spawn_blocking(move || {
-            let pack =
-                ContextPackLoader::load_beneath(&context_pack_root, &context_pack_directory)?;
-            Ok::<_, crate::context::ContextError>(select_context(&pack, &selection_text))
+            let pack = ContextPackLoader::load_beneath(&context_pack_root, &context_pack_directory)
+                .map_err(|_| ())?;
+            let mut selected_context = select_context(&pack, &selection_text);
+            let mut user_documents = load_context_documents(&user_context_path).map_err(|_| ())?;
+            user_documents.extend(selected_context.documents);
+            selected_context.documents = user_documents;
+            Ok::<_, ()>(selected_context)
         })
         .await;
         if cancellation.is_cancelled() {
@@ -604,7 +614,7 @@ fn cancellation_error() -> ProviderError {
 fn context_error() -> ProviderError {
     ProviderError {
         kind: ProviderErrorKind::Configuration,
-        message: "The configured context pack could not be loaded".to_owned(),
+        message: "Context files could not be loaded".to_owned(),
     }
 }
 

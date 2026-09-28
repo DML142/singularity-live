@@ -137,6 +137,8 @@ React owns:
   minimized without restoring it;
 - persisted window-opacity and application-scale preferences exposed through Settings →
   Customization;
+- Settings → Context management for `.md` and `.txt` files that accompany every text or
+  screenshot request;
 - actionable loading, empty, and safe error states.
 
 The frontend is feature-oriented. `src/app` composes the shell, `src/features` contains
@@ -157,6 +159,7 @@ Rust owns:
 - filesystem and platform paths;
 - microphone, system-audio loopback, and screen capture;
 - persistence and context loading, including Rust-owned customization settings;
+- native context-file selection, validation, persistence, and per-request loading;
 - image preprocessing, microphone enumeration, versioned audio, shortcut, and customization
   settings, native shortcut registration, click-through toggling, application zoom, system tray
   and taskbar-icon visibility lifecycle,
@@ -199,7 +202,10 @@ the main window receives application and manual-assistance permissions, the scre
 commands `get_shortcut_bindings` and `update_shortcut_bindings`, plus `set_voice_input_source`,
 `list_audio_input_devices`, `get_voice_input_settings`, `start_voice_input`, `stop_voice_input`,
 `get_window_opacity`, `set_window_opacity`, `get_app_scale`, `set_app_scale`,
-`get_screenshot_preferences`, and `set_screenshot_preferences`. It also receives
+`get_screenshot_preferences`, `set_screenshot_preferences`, `get_user_context_files`,
+`add_user_context_files`, and `remove_user_context_file`. File selection and content
+persistence stay in Rust; the webview receives only names and opaque IDs. User context
+content is bounded and is not logged. It also receives
 `core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
 permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
 logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
@@ -248,17 +254,26 @@ repository includes a fictional and sanitized example. The loader rejects packs 
 application data, symlinked pack directories, unknown schema fields, invalid paths,
 traversal and symlink escapes, missing files, and content beyond documented size limits.
 
+Creators can add up to 8 `.md` or `.txt` files from Settings → Context. Rust stores their
+UTF-8 contents in a versioned `user-context.json` file under application data, with a
+combined 12 KiB content limit. These documents are prepended to the context pack selection
+for every manual text and screenshot request, so relevance keywords do not filter them out.
+React receives only file names and opaque IDs. The bounded system prompt places user files
+before keyword-selected context-pack documents.
+
 Context selection is layered:
 
-1. relevant static context;
-2. rolling session summary;
-3. recent transcript turns;
-4. the current text, speech, or screenshot input.
+1. always-included user context files;
+2. relevant static context;
+3. rolling session summary;
+4. recent transcript turns;
+5. the current text, speech, or screenshot input.
 
 The current deterministic selector preserves manifest order and includes `always_include`
 documents plus documents whose configured complete keyword or phrase occurs in the text
 request or the prior text intent for a legacy screenshot follow-up. New screenshot messages
-use their current note to select static context. It avoids sending non-matching documents.
+use their current note to select static context. It omits non-matching context-pack documents;
+the user-added files above always remain in the prompt.
 A Rust-owned session also includes
 prior successful user and assistant messages in chronological order and automatically
 compacts older turns into a rolling summary when recent history exceeds either bound. A
@@ -668,6 +683,8 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
   messages and crop controls in the conversation, selectable context prefixes, a composer
   Record/Stop button, and Settings → Audio and Customization
   with Rust-persisted, adjustable app-window opacity and application zoom.
+- Settings → Context file management for `.md` and `.txt` documents persisted by Rust and
+  included in every text and screenshot request within explicit count and size limits.
 - Direct OpenAI GPT-6 Luna text and screenshot streaming alongside the OpenRouter and Gemini
   adapters; OpenAI, Soniox, Gemini, and OpenRouter keys stay in the desktop environment.
 - A minmode bind that hides app chrome while keeping the conversation and composer visible.
@@ -684,6 +701,8 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 - Rust application-status service and `SessionService` with one active request.
 - Versioned context-pack validation, safe Markdown loading, deterministic selection, and
   bounded prompt construction.
+- Bounded Rust-persisted user context files included in every text and screenshot prompt and
+  managed through narrow Tauri commands.
 - Typed OpenAI/OpenRouter/Gemini configuration, Rust-only environment secret lookup for
   `OPENAI_API_KEY`, `SONIOX_API_KEY`, `OPENROUTER_API_KEY`, and `GEMINI_API_KEY`,
   provider-independent text-generation ports, router, streaming adapters, timeout,
@@ -842,6 +861,8 @@ current stable compatible direct versions:
 - [ADR 0009: OpenAI generation and Soniox voice transcription](docs/adr/0009-openai-soniox-providers.md)
 - [ADR 0010: Transparent window opacity customization](docs/adr/0010-transparent-window-opacity.md)
 - [ADR 0011: Screenshot messages and minmode](docs/adr/0011-screenshot-messages-and-minmode.md)
+- [ADR 0012: Audio-source, click-through, and application-scale controls](docs/adr/0012-audio-source-click-through-and-scale.md)
+- [ADR 0013: Persistent user context files](docs/adr/0013-user-context-files.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform

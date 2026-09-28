@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-user-context-files"
+description = "Enables the add_user_context_files command without any pre-configured scope."
+commands.allow = ["add_user_context_files"]
+
+[[permission]]
+identifier = "deny-add-user-context-files"
+description = "Denies the add_user_context_files command without any pre-configured scope."
+commands.deny = ["add_user_context_files"]

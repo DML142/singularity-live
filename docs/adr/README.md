@@ -21,3 +21,4 @@ boundary, security posture, persistence strategy, or platform approach.
 - [0010 — Transparent window opacity customization](0010-transparent-window-opacity.md)
 - [0011 — Screenshot messages and minmode](0011-screenshot-messages-and-minmode.md)
 - [0012 — Audio-source, click-through, and application-scale controls](0012-audio-source-click-through-and-scale.md)
+- [0013 — Persistent user context files](0013-user-context-files.md)

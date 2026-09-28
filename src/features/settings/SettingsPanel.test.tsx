@@ -7,6 +7,7 @@ import type {
   ShortcutBinding,
   ShortcutBindingView,
 } from "../../lib/tauri/shortcut-client";
+import type { UserContextFileInfo } from "../../lib/tauri/user-context-client";
 
 const { getShortcutBindingsMock, updateShortcutBindingsMock } = vi.hoisted(() => ({
   getShortcutBindingsMock: vi.fn<() => Promise<readonly ShortcutBindingView[]>>(),
@@ -43,6 +44,13 @@ const {
     }>
   >(),
 }));
+const { getUserContextFilesMock, addUserContextFilesMock, removeUserContextFileMock } =
+  vi.hoisted(() => ({
+    getUserContextFilesMock: vi.fn<() => Promise<readonly UserContextFileInfo[]>>(),
+    addUserContextFilesMock: vi.fn<() => Promise<readonly UserContextFileInfo[]>>(),
+    removeUserContextFileMock:
+      vi.fn<(id: string) => Promise<readonly UserContextFileInfo[]>>(),
+  }));
 
 vi.mock("../../lib/tauri/shortcut-client", async () => {
   const actual = await vi.importActual<
@@ -66,6 +74,11 @@ vi.mock("../../lib/tauri/customization-client", () => ({
   setWindowOpacity: setWindowOpacityMock,
   getScreenshotPreferences: getScreenshotPreferencesMock,
   setScreenshotPreferences: setScreenshotPreferencesMock,
+}));
+vi.mock("../../lib/tauri/user-context-client", () => ({
+  getUserContextFiles: getUserContextFilesMock,
+  addUserContextFiles: addUserContextFilesMock,
+  removeUserContextFile: removeUserContextFileMock,
 }));
 
 const initialView: ShortcutBindingView = {
@@ -96,6 +109,9 @@ describe("Binds settings", () => {
     setScreenshotPreferencesMock
       .mockReset()
       .mockImplementation((preferences) => Promise.resolve(preferences));
+    getUserContextFilesMock.mockReset().mockResolvedValue([]);
+    addUserContextFilesMock.mockReset().mockResolvedValue([]);
+    removeUserContextFileMock.mockReset().mockResolvedValue([]);
     delete document.documentElement.dataset.appOpacity;
     updateShortcutBindingsMock.mockReset().mockImplementation((bindings) =>
       Promise.resolve(
@@ -210,6 +226,25 @@ describe("Binds settings", () => {
     await waitFor(() => {
       expect(setAppScaleMock).toHaveBeenCalledWith(110);
     });
+  });
+
+  it("adds and removes files from the always included context setting", async () => {
+    const file: UserContextFileInfo = { id: "context-id", name: "guidelines.md" };
+    addUserContextFilesMock.mockResolvedValue([file]);
+    removeUserContextFileMock.mockResolvedValue([]);
+    render(<SettingsPanel onBack={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Context" }));
+
+    expect(await screen.findByText("No context files added.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add context files" }));
+    expect(await screen.findByText("guidelines.md")).toBeInTheDocument();
+    expect(addUserContextFilesMock).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove guidelines.md" }));
+    await waitFor(() => {
+      expect(removeUserContextFileMock).toHaveBeenCalledWith("context-id");
+    });
+    expect(screen.queryByText("guidelines.md")).not.toBeInTheDocument();
   });
 
   it("shows microphone and system audio selection in the audio settings tab", async () => {
