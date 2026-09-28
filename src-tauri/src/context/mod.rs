@@ -3,6 +3,7 @@ mod manifest;
 mod prompt;
 mod selection;
 mod session;
+mod user_files;
 
 pub use loader::{ContextError, ContextPack, ContextPackLoader};
 pub use prompt::{build_session_system_prompt, build_system_prompt};
@@ -12,3 +13,5 @@ pub(crate) use session::{
     truncate_to_bytes,
 };
 pub use session::{SessionHistory, SessionTurn, SummaryBatch};
+pub(crate) use user_files::load_context_documents;
+pub use user_files::{UserContextFileInfo, UserContextService};

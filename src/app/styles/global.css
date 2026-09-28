@@ -217,6 +217,7 @@ button:focus-visible {
 }
 .settings-tabs {
   display: flex;
+  flex-wrap: wrap;
   margin: 27px 0 20px;
   border-bottom: 1px solid var(--color-line);
 }
@@ -505,6 +506,23 @@ button:focus-visible {
   margin: 0;
   font-size: 14px;
   font-weight: 620;
+}
+.context-file-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.context-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid var(--color-line);
+  padding-top: 10px;
+  color: var(--color-text);
+  font-size: 12px;
 }
 .audio-device-control {
   display: grid;

@@ -27,6 +27,9 @@ fn main() {
         "set_app_scale",
         "get_screenshot_preferences",
         "set_screenshot_preferences",
+        "get_user_context_files",
+        "add_user_context_files",
+        "remove_user_context_file",
     ]);
 
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

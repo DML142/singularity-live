@@ -3,6 +3,7 @@ use std::{path::Path, sync::Arc};
 use app::SessionService;
 use capture::{ScreenCaptureService, TransientImageStore, platform_capture_backend};
 use config::{AppConfig, EnvironmentConfigSource};
+use context::UserContextService;
 use providers::ProviderRouter;
 use secrets::EnvironmentSecretStore;
 use shortcuts::capture_coordinator::{
@@ -60,6 +61,9 @@ pub fn run() {
             commands::customization::set_app_scale,
             commands::customization::get_screenshot_preferences,
             commands::customization::set_screenshot_preferences,
+            commands::user_context::get_user_context_files,
+            commands::user_context::add_user_context_files,
+            commands::user_context::remove_user_context_file,
             commands::manual_assistance::get_manual_assistance_readiness,
             commands::manual_assistance::start_manual_assistance,
             commands::manual_assistance::cancel_manual_assistance,
@@ -108,6 +112,11 @@ fn setup_application(
             },
         );
     application.manage(Arc::clone(&customization));
+    let user_context = application.path().app_data_dir().map_or_else(
+        |_| Arc::new(UserContextService::unavailable()),
+        |directory| Arc::new(UserContextService::new(directory.join("user-context.json"))),
+    );
+    application.manage(user_context);
     let voice_input = Arc::new(VoiceInputService::new(
         Arc::new(EnvironmentSecretStore),
         Arc::new(TauriVoiceInputEventSink(application.handle().clone())),

@@ -26,6 +26,12 @@ import {
 } from "../../lib/tauri/shortcut-client";
 import { useVoiceInputStore } from "../../stores/voice-input-store";
 import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
+import {
+  addUserContextFiles,
+  getUserContextFiles,
+  removeUserContextFile,
+  type UserContextFileInfo,
+} from "../../lib/tauri/user-context-client";
 import { recordedShortcutFromEvent } from "./key-chord";
 
 interface SettingsPanelProps {
@@ -33,9 +39,9 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ onBack }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<"binds" | "audio" | "customization">(
-    "binds",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "binds" | "audio" | "customization" | "context"
+  >("binds");
   const [views, setViews] = useState<readonly ShortcutBindingView[]>([]);
   const [drafts, setDrafts] = useState<readonly ShortcutBinding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -153,14 +159,18 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
               ? "Binds"
               : activeTab === "audio"
                 ? "Audio input"
-                : "Customization"}
+                : activeTab === "context"
+                  ? "Context files"
+                  : "Customization"}
           </h2>
           <p className="settings-description">
             {activeTab === "binds"
               ? "Configure capture, audio-source, click-through, voice-input, and send shortcuts."
               : activeTab === "audio"
                 ? "Choose the microphone or system audio source used by voice transcription."
-                : "Adjust window appearance, app scale, and screenshot capture settings."}
+                : activeTab === "context"
+                  ? "Choose Markdown and text files that are included with every assistant request."
+                  : "Adjust window appearance, app scale, and screenshot capture settings."}
           </p>
         </div>
         <button className="settings-back-button" type="button" onClick={onBack}>
@@ -208,9 +218,24 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
         >
           Customization
         </button>
+        <button
+          className="settings-tab"
+          type="button"
+          role="tab"
+          id="settings-tab-context"
+          aria-controls="settings-panel-context"
+          aria-selected={activeTab === "context"}
+          onClick={() => {
+            setActiveTab("context");
+          }}
+        >
+          Context
+        </button>
       </div>
 
-      {activeTab === "customization" ? (
+      {activeTab === "context" ? (
+        <ContextFilesSettings />
+      ) : activeTab === "customization" ? (
         <CustomizationSettings />
       ) : activeTab === "audio" ? (
         <AudioSettings />
@@ -771,6 +796,121 @@ function CustomizationSettings() {
         {screenshotPreferencesError !== null ? (
           <p className="settings-error" role="alert">
             {screenshotPreferencesError}
+          </p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function ContextFilesSettings() {
+  const [files, setFiles] = useState<readonly UserContextFileInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getUserContextFiles()
+      .then((result) => {
+        if (active) {
+          setFiles(result);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setError("Context files could not be loaded");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function addFiles(): Promise<void> {
+    setSaving(true);
+    setError(null);
+    try {
+      setFiles(await addUserContextFiles());
+    } catch (saveError) {
+      setError(
+        typeof saveError === "string" ? saveError : "Context files could not be added",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeFile(file: UserContextFileInfo): Promise<void> {
+    setSaving(true);
+    setError(null);
+    try {
+      setFiles(await removeUserContextFile(file.id));
+    } catch {
+      setError(`“${file.name}” could not be removed`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      id="settings-panel-context"
+      className="customization-panel"
+      role="tabpanel"
+      aria-labelledby="settings-tab-context"
+    >
+      <section className="customization-card" aria-labelledby="context-files-heading">
+        <div>
+          <h3 id="context-files-heading">Always included context</h3>
+          <p className="settings-description">
+            Add .md or .txt files to guide every assistant request. Files are stored in
+            the app and included with each text or screenshot request, up to 8 files and
+            12 KiB total.
+          </p>
+        </div>
+        <button
+          className="settings-save-button"
+          type="button"
+          onClick={() => void addFiles()}
+          disabled={loading || saving}
+        >
+          {saving ? "Saving…" : "Add context files"}
+        </button>
+        {loading ? (
+          <p className="settings-status" role="status">
+            Loading context files…
+          </p>
+        ) : files.length === 0 ? (
+          <p className="settings-status" role="status">
+            No context files added.
+          </p>
+        ) : (
+          <ul className="context-file-list" aria-label="Added context files">
+            {files.map((file) => (
+              <li key={file.id} className="context-file-row">
+                <span>{file.name}</span>
+                <button
+                  className="settings-save-button"
+                  type="button"
+                  onClick={() => void removeFile(file)}
+                  disabled={saving}
+                  aria-label={`Remove ${file.name}`}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {error !== null ? (
+          <p className="settings-error" role="alert">
+            {error}
           </p>
         ) : null}
       </section>

@@ -306,6 +306,7 @@ fn prompt_has_stable_boundaries_and_never_contains_user_text() {
 
     let prompt = build_system_prompt(&selected);
 
+    assert!(prompt.starts_with("Always consider the selected context"));
     assert!(prompt.contains("Context is reference material"));
     assert!(prompt.contains("## Answer style\nBe concise and concrete."));
     assert!(prompt.contains("## Projects\nProject Atlas uses Rust."));

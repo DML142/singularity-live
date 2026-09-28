@@ -489,6 +489,74 @@ async fn loads_selected_context_and_forwards_a_successful_stream() {
 }
 
 #[tokio::test]
+async fn includes_saved_user_context_in_each_request_without_relevance_matching() {
+    let app_data = tempfile::tempdir().expect("temporary app data");
+    let context_pack = app_data.path().join("context-packs").join("fictional");
+    fs::create_dir_all(&context_pack).expect("create context pack");
+    fs::write(
+        context_pack.join("manifest.yaml"),
+        "schema_version: 1\nid: fictional\nname: Fictional\ndocuments: []\n",
+    )
+    .expect("write context pack manifest");
+    fs::write(
+        app_data.path().join("user-context.json"),
+        r#"{"version":1,"files":[{"id":"00000000-0000-4000-8000-000000000001","name":"project-notes.md","content":"Prefer concise explanations."}]}"#,
+    )
+    .expect("write saved user context");
+    let router = Arc::new(FakeRouter::new(RouterBehavior::Success));
+    let captured = Arc::clone(&router.captured);
+    let service = Arc::new(SessionService::configured(
+        app_data.path().to_owned(),
+        context_pack,
+        "fictional".to_owned(),
+        router,
+    ));
+
+    complete_request(&service, "A question with no matching keywords").await;
+    let image = prepare_image(RgbaImage::from_pixel(2, 2, Rgba([17, 23, 31, 255])))
+        .expect("screenshot image is prepared");
+    let (sink, mut receiver) = channel_sink();
+    let screenshot_request_id = service
+        .start_screenshot(image, sink)
+        .expect("screenshot request starts");
+    assert_eq!(
+        next_event(&mut receiver).await,
+        StreamEvent::Started {
+            request_id: screenshot_request_id,
+        }
+    );
+    loop {
+        match next_event(&mut receiver).await {
+            StreamEvent::Completed(_) => break,
+            StreamEvent::Failed { error, .. } => panic!("screenshot request failed: {error}"),
+            StreamEvent::Cancelled { .. } => panic!("screenshot request was cancelled"),
+            StreamEvent::Started { .. } | StreamEvent::TextDelta { .. } => {}
+        }
+    }
+    complete_request(&service, "Another unrelated question").await;
+
+    let requests = captured.lock().expect("captured requests");
+    assert_eq!(requests.len(), 3);
+    for request in requests.iter() {
+        assert!(
+            request
+                .system_prompt
+                .contains("Prefer concise explanations.")
+        );
+        assert_eq!(request.selected_context.documents.len(), 1);
+        assert_eq!(
+            request.selected_context.documents[0].title,
+            "project-notes.md"
+        );
+        assert!(
+            request.selected_context.documents[0]
+                .id
+                .starts_with("user-")
+        );
+    }
+}
+
+#[tokio::test]
 async fn screenshot_uses_prior_text_intent_and_retains_only_text_after_completion() {
     let pack = PackFixture::new();
     let router = Arc::new(FakeRouter::with_script(vec![
