@@ -12,6 +12,14 @@ fn main() {
         "crop_screen_capture",
         "discard_screen_capture",
         "start_screenshot_assistance",
+        "get_shortcut_bindings",
+        "update_shortcut_bindings",
+        "list_audio_input_devices",
+        "set_voice_input_source",
+        "start_voice_input",
+        "stop_voice_input",
+        "get_window_opacity",
+        "set_window_opacity",
     ]);
 
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

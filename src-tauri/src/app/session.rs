@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
 };
 
@@ -115,15 +115,18 @@ impl SessionService {
                 message: error.message,
             };
         }
-        if ContextPackLoader::load_beneath(
+        if let Err(error) = ContextPackLoader::load_beneath(
             &runtime.context_pack_root,
             &runtime.context_pack_directory,
-        )
-        .is_err()
-        {
+        ) {
+            let pack_path_status = inspect_path(&runtime.context_pack_directory);
+            let app_data_status = inspect_path(&runtime.context_pack_root);
             return ManualAssistanceReadiness::Unconfigured {
-                message: "The configured context pack is invalid. Check its manifest and referenced Markdown files."
-                    .to_owned(),
+                message: format!(
+                    "The configured context pack at '{}' could not be loaded: {}. Pack path: {pack_path_status}. App data root: {app_data_status}.",
+                    runtime.context_pack_directory.display(),
+                    error.safe_summary(),
+                ),
             };
         }
         ManualAssistanceReadiness::Ready {
@@ -583,6 +586,20 @@ fn context_error() -> ProviderError {
     ProviderError {
         kind: ProviderErrorKind::Configuration,
         message: "The configured context pack could not be loaded".to_owned(),
+    }
+}
+
+fn inspect_path(path: &Path) -> String {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => match std::fs::canonicalize(path) {
+            Ok(canonical_path) => format!(
+                "exists (directory: {}) and resolves to '{}'",
+                metadata.is_dir(),
+                canonical_path.display(),
+            ),
+            Err(error) => format!("exists but cannot be resolved: {error}"),
+        },
+        Err(error) => format!("cannot be inspected: {error}"),
     }
 }
 

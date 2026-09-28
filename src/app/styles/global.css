@@ -37,7 +37,7 @@ body,
 body {
   min-width: 360px;
   min-height: 0;
-  background: var(--color-canvas);
+  background: transparent;
 }
 button,
 input,
@@ -68,6 +68,7 @@ button:focus-visible {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
+  opacity: 1;
 }
 .brand-lockup,
 .header-actions {
@@ -154,12 +155,191 @@ button:focus-visible {
   opacity: 0.55;
 }
 
+.settings-panel {
+  width: min(100%, 960px);
+  min-height: 0;
+  flex: 1 1 auto;
+  align-self: center;
+  overflow: auto;
+  padding: 34px 38px 28px;
+}
+.settings-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.settings-eyebrow {
+  margin: 0 0 6px;
+  color: var(--color-signal);
+  font-size: 11px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.settings-heading h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+.settings-description {
+  max-width: 580px;
+  margin: 8px 0 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settings-back-button,
+.settings-add-button,
+.settings-save-button,
+.shortcut-clear-button,
+.shortcut-remove-button {
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  padding: 8px 11px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 12px;
+}
+.settings-back-button,
+.settings-add-button,
+.shortcut-clear-button,
+.shortcut-remove-button {
+  color: var(--color-muted);
+}
+.settings-tabs {
+  display: flex;
+  margin: 27px 0 20px;
+  border-bottom: 1px solid var(--color-line);
+}
+.settings-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.settings-tab[aria-selected="true"] {
+  border-bottom-color: var(--color-signal);
+  color: var(--color-text);
+}
+.shortcut-bindings {
+  display: grid;
+  gap: 12px;
+}
+.shortcut-binding-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  background: var(--color-surface);
+}
+.shortcut-binding-title,
+.shortcut-chord-controls,
+.settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.shortcut-binding-title {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.shortcut-registration {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.shortcut-registration[data-state="registered"] {
+  color: var(--color-ready);
+}
+.shortcut-registration[data-state="failed"] {
+  color: var(--color-signal);
+}
+.shortcut-action-label {
+  display: grid;
+  max-width: 220px;
+  gap: 6px;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.shortcut-action-label select {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  padding: 8px 10px;
+  background: var(--color-canvas);
+  color: var(--color-text);
+}
+.shortcut-chord-controls {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.shortcut-record-button {
+  min-width: 180px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 5px;
+  padding: 9px 12px;
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-size: 12px;
+  text-align: left;
+}
+.shortcut-record-button[aria-pressed="true"] {
+  border-color: var(--color-signal);
+  color: var(--color-signal);
+}
+.shortcut-recording-help {
+  margin: -5px 0 0;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.settings-footer {
+  margin-top: 18px;
+}
+.settings-save-button {
+  border-color: rgba(105, 210, 231, 0.38);
+  background: rgba(105, 210, 231, 0.1);
+  color: var(--color-ready);
+}
+.settings-save-button:disabled,
+.settings-add-button:disabled,
+.settings-back-button:disabled,
+.shortcut-clear-button:disabled,
+.shortcut-remove-button:disabled,
+.shortcut-record-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.settings-status,
+.settings-error {
+  margin: 16px 0;
+  font-size: 12px;
+}
+.settings-status {
+  color: var(--color-muted);
+}
+.settings-error {
+  border-left: 2px solid var(--color-signal);
+  padding: 8px 11px;
+  background: rgba(255, 121, 104, 0.08);
+  color: var(--color-signal);
+}
+
 .workspace {
   display: grid;
   min-height: 0;
   flex: 1 1 auto;
-  grid-template-columns: minmax(220px, 27%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
+}
+.workspace[hidden] {
+  display: none;
 }
 .session-rail {
   min-width: 0;
@@ -172,7 +352,7 @@ button:focus-visible {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 .workspace-panel {
@@ -181,13 +361,6 @@ button:focus-visible {
   height: 100%;
   padding: 22px 24px;
   overflow: hidden;
-}
-.transcript-panel {
-  display: flex;
-  flex-direction: column;
-}
-.workspace-main .workspace-panel + .workspace-panel {
-  border-top: 1px solid var(--color-line);
 }
 .panel-header {
   display: flex;
@@ -292,6 +465,46 @@ button:focus-visible {
   flex: 1;
   flex-direction: column;
   padding-top: 20px;
+}
+.customization-panel {
+  max-width: 720px;
+}
+.customization-card {
+  display: grid;
+  gap: 20px;
+  border: 1px solid var(--color-line);
+  border-radius: 7px;
+  padding: 20px;
+  background: var(--color-surface);
+}
+.customization-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 620;
+}
+.opacity-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.opacity-control output {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+.opacity-control input {
+  width: 100%;
+  grid-column: 1 / -1;
+  accent-color: var(--color-signal);
+}
+.opacity-range-labels {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  color: var(--color-dim);
+  font-size: 10px;
 }
 .assistant-session-controls {
   display: flex;
@@ -484,7 +697,7 @@ button:focus-visible {
 }
 .screen-assistance {
   flex: 0 0 auto;
-  max-height: 34vh;
+  max-height: 30vh;
   margin-bottom: 10px;
   overflow: auto;
   border: 1px solid var(--color-line);
@@ -533,6 +746,9 @@ button:focus-visible {
 .screen-assistance-controls,
 .screen-target-row {
   margin-top: 9px;
+}
+.screen-assistance-controls {
+  flex-wrap: wrap;
 }
 .screen-source-label,
 .screen-preview-header {
@@ -713,34 +929,52 @@ button:focus-visible {
   clip-path: inset(50%);
 }
 
+:root[data-app-opacity="40"] .app-shell {
+  opacity: 0.4;
+}
+:root[data-app-opacity="45"] .app-shell {
+  opacity: 0.45;
+}
+:root[data-app-opacity="50"] .app-shell {
+  opacity: 0.5;
+}
+:root[data-app-opacity="55"] .app-shell {
+  opacity: 0.55;
+}
+:root[data-app-opacity="60"] .app-shell {
+  opacity: 0.6;
+}
+:root[data-app-opacity="65"] .app-shell {
+  opacity: 0.65;
+}
+:root[data-app-opacity="70"] .app-shell {
+  opacity: 0.7;
+}
+:root[data-app-opacity="75"] .app-shell {
+  opacity: 0.75;
+}
+:root[data-app-opacity="80"] .app-shell {
+  opacity: 0.8;
+}
+:root[data-app-opacity="85"] .app-shell {
+  opacity: 0.85;
+}
+:root[data-app-opacity="90"] .app-shell {
+  opacity: 0.9;
+}
+:root[data-app-opacity="95"] .app-shell {
+  opacity: 0.95;
+}
+:root[data-app-opacity="100"] .app-shell {
+  opacity: 1;
+}
+
 @media (max-width: 760px) {
   .app-header {
     padding: 0 18px;
   }
   .workspace {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .session-rail {
-    border-right: 0;
-    border-bottom: 1px solid var(--color-line);
-    overflow: visible;
-  }
-  .session-rail .workspace-panel {
-    height: auto;
-    padding: 12px 18px;
-  }
-  .session-state {
-    padding: 10px 0;
-  }
-  .session-state .state-copy {
-    display: none;
-  }
-  .session-facts div {
-    padding: 7px 0;
-  }
-  .workspace-main {
-    grid-template-rows: minmax(96px, 0.65fr) minmax(0, 1.35fr);
   }
   .workspace-panel {
     padding: 18px;
@@ -781,9 +1015,6 @@ button:focus-visible {
   }
   .workspace-panel {
     padding: 16px 14px;
-  }
-  .session-rail .workspace-panel {
-    padding: 10px 14px;
   }
   .composer-footer {
     padding-left: 9px;

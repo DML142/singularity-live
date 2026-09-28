@@ -6,6 +6,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use xcap::{Monitor, Window, XCapError, image::RgbaImage};
 
+use super::cursor::{
+    CursorPositionProvider, MonitorResolver, PlatformCursorPositionProvider, XCapMonitorResolver,
+};
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureTargetKind {
@@ -151,6 +155,14 @@ pub trait CaptureBackend: Send + Sync {
         cancellation: CancellationToken,
     ) -> Result<RgbaImage, CaptureError>;
 
+    async fn monitor_under_cursor(&self) -> Result<CaptureTarget, CaptureError> {
+        let mut targets = self.targets(CaptureTargetKind::Monitor).await?;
+        if targets.len() == 1 {
+            return targets.pop().ok_or_else(unavailable_error);
+        }
+        Err(unavailable_error())
+    }
+
     async fn target_by_id(&self, id: &str) -> Result<CaptureTarget, CaptureError> {
         for kind in [CaptureTargetKind::Monitor, CaptureTargetKind::Window] {
             if let Some(target) = self
@@ -273,6 +285,11 @@ impl CaptureBackend for XCapCaptureBackend {
         }
         Ok(image)
     }
+
+    async fn monitor_under_cursor(&self) -> Result<CaptureTarget, CaptureError> {
+        let position = PlatformCursorPositionProvider.position()?;
+        XCapMonitorResolver.resolve(position)
+    }
 }
 
 #[must_use]
@@ -300,6 +317,13 @@ const fn unsupported_error() -> CaptureError {
     CaptureError::new(
         CaptureErrorKind::Unsupported,
         "Screen capture is not supported on this desktop",
+    )
+}
+
+const fn unavailable_error() -> CaptureError {
+    CaptureError::new(
+        CaptureErrorKind::Unavailable,
+        "The screen under the pointer could not be resolved",
     )
 }
 

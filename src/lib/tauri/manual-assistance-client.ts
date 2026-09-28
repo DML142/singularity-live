@@ -5,7 +5,7 @@ const MAX_MANUAL_TEXT_BYTES = 16 * 1024;
 const REQUEST_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type ProviderId = "open_router";
+export type ProviderId = "open_router" | "open_ai" | "gemini";
 
 export type ManualAssistanceReadiness =
   | {
@@ -116,7 +116,7 @@ function parseReadiness(value: unknown): ManualAssistanceReadiness | null {
   if (
     value.status === "ready" &&
     hasExactKeys(value, ["status", "provider", "model", "contextPack"]) &&
-    value.provider === "open_router" &&
+    isProviderId(value.provider) &&
     isNonEmptyString(value.model) &&
     isNonEmptyString(value.contextPack)
   ) {
@@ -163,7 +163,7 @@ function parseEvent(value: unknown): ManualAssistanceEvent | null {
     case "completed": {
       const usage = parseUsage(value.usage);
       return hasExactKeys(value, ["type", "requestId", "provider", "model", "usage"]) &&
-        value.provider === "open_router" &&
+        isProviderId(value.provider) &&
         isNonEmptyString(value.model) &&
         (value.usage === null || usage !== null)
         ? {
@@ -234,6 +234,10 @@ function isErrorCode(value: string): value is ManualAssistanceErrorCode {
     value === "cancellation" ||
     value === "malformedResponse"
   );
+}
+
+function isProviderId(value: unknown): value is ProviderId {
+  return value === "open_router" || value === "open_ai" || value === "gemini";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

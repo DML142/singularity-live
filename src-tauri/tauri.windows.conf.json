@@ -1,0 +1,20 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Singularity Live",
+        "width": 1080,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 540,
+        "alwaysOnTop": true,
+        "contentProtected": true,
+        "transparent": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  }
+}

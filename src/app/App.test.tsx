@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -36,20 +36,26 @@ describe("application shell", () => {
     listenMock.mockReset().mockResolvedValue(vi.fn());
   });
 
-  it("shows the real backend status and honest empty workspace states", async () => {
+  it("shows the assistant without the session or transcript side panels", async () => {
     render(<App />);
 
     expect(
       screen.getByRole("heading", { level: 1, name: "Singularity Live" }),
     ).toBeInTheDocument();
     expect(await screen.findByText("Backend ready")).toBeInTheDocument();
-    expect(screen.getByText("No active session")).toBeInTheDocument();
+    expect(screen.queryByText("No active session")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Transcript" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText(
         "Ask about the text you are working on. Relevant context is added automatically.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Binds" }),
+    ).toBeInTheDocument();
   });
 
   it("reports an unavailable backend when IPC returns a malformed payload", async () => {

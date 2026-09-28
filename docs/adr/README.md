@@ -14,3 +14,6 @@ boundary, security posture, persistence strategy, or platform approach.
 - [0003 — OpenRouter and the manual-assistance trust boundary](0003-openrouter-manual-assistance-boundary.md)
 - [0004 — Ephemeral session context and Rust-owned lifecycle](0004-ephemeral-session-context.md)
 - [0005 — Ephemeral screen assistance and provider-neutral image requests](0005-ephemeral-screen-assistance.md)
+- [0006 — Global screenshot shortcuts and Rust-owned capture lifecycle](0006-global-screenshot-shortcuts.md)
+- [0007 — Direct Gemini generation for text and screenshots](0007-gemini-generation.md)
+- [0008 — Windows broadcast capture protection](0008-windows-broadcast-capture-protection.md)

@@ -12,12 +12,17 @@ use crate::{
     secrets::{SecretName, SecretStore},
 };
 
-use super::{OpenRouterAdapter, StreamSink, TextGenerationProvider, TextGenerationRouter};
+use super::{
+    GeminiAdapter, OpenAiAdapter, OpenRouterAdapter, StreamSink, TextGenerationProvider,
+    TextGenerationRouter,
+};
 
 pub struct ProviderRouter {
     config: AppConfig,
     secret_store: Arc<dyn SecretStore>,
     openrouter: OpenRouterAdapter,
+    openai: OpenAiAdapter,
+    gemini: GeminiAdapter,
 }
 
 impl ProviderRouter {
@@ -27,11 +32,15 @@ impl ProviderRouter {
         secret_store: Arc<dyn SecretStore>,
         client: reqwest::Client,
     ) -> Self {
-        let openrouter = OpenRouterAdapter::new(client, config.request_timeout());
+        let openrouter = OpenRouterAdapter::new(client.clone(), config.request_timeout());
+        let openai = OpenAiAdapter::new(client.clone(), config.request_timeout());
+        let gemini = GeminiAdapter::new(client, config.request_timeout());
         Self {
             config,
             secret_store,
             openrouter,
+            openai,
+            gemini,
         }
     }
 
@@ -53,11 +62,11 @@ impl TextGenerationRouter for ProviderRouter {
 
     fn check_readiness(&self) -> Result<(), ProviderError> {
         self.secret_store
-            .get(SecretName::OpenRouterApiKey)
+            .get(secret_name(self.config.provider()))
             .map(|_| ())
             .map_err(|_| ProviderError {
                 kind: ProviderErrorKind::Configuration,
-                message: "OpenRouter credential is not configured".to_owned(),
+                message: missing_key_message(self.config.provider()).to_owned(),
             })
     }
 
@@ -75,13 +84,43 @@ impl TextGenerationRouter for ProviderRouter {
         }
         let secret = self
             .secret_store
-            .get(SecretName::OpenRouterApiKey)
+            .get(secret_name(self.config.provider()))
             .map_err(|_| ProviderError {
                 kind: ProviderErrorKind::Configuration,
-                message: "OpenRouter credential is not configured".to_owned(),
+                message: missing_key_message(self.config.provider()).to_owned(),
             })?;
-        self.openrouter
-            .stream(request, &secret, cancellation, sink)
-            .await
+        match self.config.provider() {
+            ProviderId::OpenRouter => {
+                self.openrouter
+                    .stream(request, &secret, cancellation, sink)
+                    .await
+            }
+            ProviderId::OpenAi => {
+                self.openai
+                    .stream(request, &secret, cancellation, sink)
+                    .await
+            }
+            ProviderId::Gemini => {
+                self.gemini
+                    .stream(request, &secret, cancellation, sink)
+                    .await
+            }
+        }
+    }
+}
+
+const fn secret_name(provider: ProviderId) -> SecretName {
+    match provider {
+        ProviderId::OpenRouter => SecretName::OpenRouterApiKey,
+        ProviderId::OpenAi => SecretName::OpenAiApiKey,
+        ProviderId::Gemini => SecretName::GeminiApiKey,
+    }
+}
+
+const fn missing_key_message(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenRouter => "OpenRouter credential is not configured",
+        ProviderId::OpenAi => "OpenAI credential is not configured",
+        ProviderId::Gemini => "Gemini credential is not configured",
     }
 }

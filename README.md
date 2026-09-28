@@ -1,23 +1,31 @@
 # Singularity Live
 
-Singularity Live is a desktop context copilot for working with live conversation, screen
-context, persistent user context, and configurable AI providers. The app now supports
-manual text assistance through OpenRouter, with context packs loaded by Rust from the
-application data directory. Audio, screenshots, session history, and persistent credential
-storage remain future work; the implementation record is in [tech.md](tech.md).
+Singularity Live is a backstage assistant for creators making live coding streams, recorded
+programming or gameplay videos, and dynamic scripts. It accepts typed requests and temporary
+screenshots, then returns streamed text through GPT-6 Luna, OpenRouter, or Gemini. Voice input
+uses Soniox to create editable text; spoken assistant replies are out of scope. On Windows,
+Tauri is configured to exclude the assistant window from supported screen captures while it
+remains visible locally; OBS verification is still pending. The product direction and roadmap
+are recorded in [tech.md](tech.md).
 
 ## Current status
 
-The desktop foundation and manual context/provider path are implemented. The provider path
-has automated coverage; a live OpenRouter request has not been verified in this workspace.
-The roadmap status and validation evidence are recorded in [tech.md](tech.md).
+The desktop foundation, manual context/provider path, and transient screenshot assistance
+are implemented. Provider calls in automated checks use mocks; live provider requests are
+not sent by the test suite. Roadmap status and validation evidence are recorded in
+[tech.md](tech.md).
 
 The shell currently provides:
 
-- an honest idle workspace for session and transcript areas, plus a manual request composer;
+- a live transcript panel and a manual request composer;
 - backend readiness loaded through a typed Tauri IPC command;
+- temporary screen assistance from the assistant or a configurable global shortcut;
+- an always-on-top main window and a Rust-owned capture, permission, and image lifecycle;
+- Windows capture-protection configuration for the main window, pending manual OBS validation;
+- a Binds settings view for adding screenshot and voice-input shortcuts;
+- microphone or system-audio capture with local silence filtering and manual transcript review;
 - Rust-owned context loading, provider configuration, credentials, routing, and streaming;
-- safe setup guidance when OpenRouter or the configured context pack is unavailable;
+- safe setup guidance when the selected provider or context pack is unavailable;
 - exact Tauri permissions for status, readiness, start, and cancel commands.
 
 ## Technology
@@ -63,10 +71,67 @@ Run the desktop application with the real Rust IPC boundary:
 pnpm tauri dev
 ```
 
-## Manual text assistance
+For an interactive development launcher with numbered choices for the workflow, provider/model,
+and installed context packs. It asks for missing OpenAI, OpenRouter, or Gemini credentials and
+an optional Soniox key with hidden input, then passes them only to the app process:
 
-The first provider is OpenRouter. Set the following variables in the environment inherited
-by `pnpm tauri dev`:
+```sh
+pnpm assist
+```
+
+With arguments, the launcher skips prompts and requires the selected key in the environment.
+It never accepts the key as an argument:
+
+```sh
+export OPENROUTER_API_KEY='…'
+pnpm assist -- --task screenshot --context-pack fictional-developer
+```
+
+The direct `pnpm tauri dev` command remains available and unchanged. To choose a model not
+listed in the numbered menu, set `SINGULARITY_LIVE_PROVIDER` and `SINGULARITY_LIVE_MODEL`
+before running the launcher, or use its argument mode.
+
+## Text, screenshots, and voice input
+
+The default generation profile is GPT-6 Luna for text, reviewed screenshots, code, and
+explanations. The app sends requests directly to OpenAI from Rust:
+
+```sh
+export SINGULARITY_LIVE_PROVIDER=openai
+export SINGULARITY_LIVE_MODEL=gpt-6-luna
+export OPENAI_API_KEY='…'
+export SINGULARITY_LIVE_CONTEXT_PACK=fictional-developer
+pnpm tauri dev
+```
+
+For real-time incoming voice transcription, also set `SONIOX_API_KEY`. `pnpm assist` asks
+for it optionally with hidden input. The app uses Soniox `stt-rt-v5` for microphone or Windows
+system-audio input, then places the finalized transcript in the composer for editing and
+manual sending. Without the Soniox key, text and screenshot assistance still work, but voice
+input is unavailable. Keys remain in the desktop process environment and are not saved.
+
+## Alternative text providers
+
+Gemini remains available for text and screenshot assistance. Set the following variables in
+the environment inherited by
+`pnpm tauri dev`:
+
+```sh
+export SINGULARITY_LIVE_PROVIDER=gemini
+export SINGULARITY_LIVE_MODEL=gemini-3.8-flash
+export GEMINI_API_KEY='…'
+export SINGULARITY_LIVE_CONTEXT_PACK=fictional-developer
+export SINGULARITY_LIVE_REQUEST_TIMEOUT_SECONDS=60
+pnpm tauri dev
+```
+
+Create a key in [Google AI Studio](https://aistudio.google.com/api-keys). The app reads
+`GEMINI_API_KEY` only in Rust and sends it to Google's Gemini API as an authorization
+header. Do not put it in a `VITE_` variable, frontend `.env` file, source file, or Tauri
+command argument. The interactive `pnpm assist` launcher can ask for the key with hidden
+input; entering a model ID that starts with `gemini-` selects Gemini automatically.
+
+For OpenRouter, set the following variables instead:
 
 ```sh
 export SINGULARITY_LIVE_PROVIDER=openrouter
@@ -84,9 +149,11 @@ underlying model may vary between requests. Availability and behavior can change
 [OpenRouter's free router](https://openrouter.ai/openrouter/free) and
 [model catalog](https://openrouter.ai/models).
 
-The app accepts an OpenRouter model slug in `SINGULARITY_LIVE_MODEL`. It does not provide a
-model picker or automatically change models. An unset or unsupported provider/model
-configuration leaves the app open and shows safe setup guidance.
+The app accepts the selected provider's model identifier in `SINGULARITY_LIVE_MODEL`. The
+interactive launcher provides numbered presets and keeps the configured model fixed for that
+run. An unset or unsupported provider/model configuration leaves the app open and shows safe
+setup guidance. Screenshot assistance sends the reviewed image with the request; speech input
+is transcribed to text and assistant replies remain text-only.
 
 Context packs are read from Tauri's platform-specific application data directory at
 `context-packs/<SINGULARITY_LIVE_CONTEXT_PACK>/`. With this app's current identifier,
@@ -146,8 +213,10 @@ belong in Rust behind narrow typed commands. The environment-backed credential s
 for local development; React never receives provider keys and does not call model providers
 directly.
 
-Raw audio and screenshots are planned to be transient by default. Capture will never
-start silently on launch, and no stealth or screen-capture-evasion behavior is in scope.
+Screenshots stay in Rust's bounded in-memory store and expire after five minutes. Capture
+starts only after the user presses a configured shortcut or the in-app capture control; the
+app never captures in the background or sends an image automatically. Audio remains future
+work.
 
 Read [tech.md](tech.md) for the full architecture, roadmap, and current implementation
 status. Significant decisions are recorded under [`docs/adr`](docs/adr).

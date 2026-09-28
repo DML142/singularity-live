@@ -11,10 +11,16 @@ import remarkGfm from "remark-gfm";
 
 import { WorkspacePanel } from "../../components/ui/WorkspacePanel";
 import type { CropRect } from "../../lib/tauri/screen-assistance-client";
+import { subscribeQuickSend } from "../../lib/tauri/shortcut-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
 import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
+import { useVoiceInputStore } from "../../stores/voice-input-store";
 
-export function AssistantPanel() {
+interface AssistantPanelProps {
+  readonly initialTask?: "text" | "screenshot" | undefined;
+}
+
+export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   const readiness = useManualAssistanceStore((state) => state.readiness);
   const phase = useManualAssistanceStore((state) => state.phase);
   const turns = useManualAssistanceStore((state) => state.turns);
@@ -51,8 +57,24 @@ export function AssistantPanel() {
   const clearScreenForReset = useScreenAssistanceStore(
     (state) => state.clearForSessionReset,
   );
+  const voicePhase = useVoiceInputStore((state) => state.phase);
+  const voiceSource = useVoiceInputStore((state) => state.source);
+  const voiceDevices = useVoiceInputStore((state) => state.devices);
+  const microphoneDeviceId = useVoiceInputStore((state) => state.microphoneDeviceId);
+  const voiceTranscript = useVoiceInputStore((state) => state.transcript);
+  const voiceError = useVoiceInputStore((state) => state.error);
+  const finalizedTranscript = useVoiceInputStore((state) => state.finalizedTranscript);
+  const setVoiceSource = useVoiceInputStore((state) => state.setSource);
+  const loadVoiceDevices = useVoiceInputStore((state) => state.loadDevices);
+  const startVoiceInput = useVoiceInputStore((state) => state.start);
+  const stopVoiceInput = useVoiceInputStore((state) => state.stop);
+  const clearFinalizedTranscript = useVoiceInputStore(
+    (state) => state.clearFinalizedTranscript,
+  );
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const quickSendHandler = useRef<() => void>(() => {});
+  const screenAssistanceRef = useRef<HTMLElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const screenshotImageRef = useRef<HTMLImageElement>(null);
   const cropStart = useRef<{ readonly x: number; readonly y: number } | null>(null);
@@ -97,16 +119,49 @@ export function AssistantPanel() {
   }, [phase]);
 
   useEffect(() => {
+    if (readiness.phase !== "ready") {
+      return;
+    }
+    if (initialTask === "text") {
+      composerRef.current?.focus();
+    } else if (initialTask === "screenshot") {
+      screenAssistanceRef.current?.focus();
+    }
+  }, [initialTask, readiness.phase]);
+
+  useEffect(() => {
     const conversation = conversationRef.current;
     if (conversation !== null && stickToBottom.current) {
       conversation.scrollTop = conversation.scrollHeight;
     }
   }, [turns]);
 
+  useEffect(() => {
+    if (finalizedTranscript !== null) {
+      composerRef.current?.focus();
+    }
+  }, [finalizedTranscript]);
+
+  const draftText =
+    finalizedTranscript === null
+      ? text
+      : text.trim().length === 0
+        ? finalizedTranscript.text
+        : `${text.trim()}\n${finalizedTranscript.text}`;
+
   const submitPrompt = (prompt: string) => {
-    if (prompt.trim().length > 0) {
+    if (
+      prompt.trim().length > 0 &&
+      readiness.phase === "ready" &&
+      phase !== "starting" &&
+      phase !== "streaming" &&
+      !resetPending
+    ) {
       stickToBottom.current = true;
       setText("");
+      if (finalizedTranscript !== null) {
+        clearFinalizedTranscript(finalizedTranscript.id);
+      }
       if (composerRef.current !== null) {
         composerRef.current.style.height = "56px";
       }
@@ -116,15 +171,41 @@ export function AssistantPanel() {
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    submitPrompt(text);
+    submitPrompt(draftText);
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      submitPrompt(text);
+      submitPrompt(draftText);
     }
   };
+
+  useEffect(() => {
+    quickSendHandler.current = () => {
+      submitPrompt(draftText);
+    };
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+    void subscribeQuickSend(() => {
+      quickSendHandler.current();
+    })
+      .then((stopListening) => {
+        if (mounted) {
+          unlisten = stopListening;
+        } else {
+          stopListening();
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, []);
 
   const busy = phase === "starting" || phase === "streaming";
   const hasPriorConversation = turns.some((turn) => turn.phase === "completed");
@@ -204,6 +285,118 @@ export function AssistantPanel() {
   return (
     <WorkspacePanel title="Assistant" detail={detail} className="assistant-panel">
       <div className="assistant-body">
+        <section className="screen-assistance" aria-label="Voice input">
+          <div className="screen-assistance-heading">
+            <div>
+              <p className="screen-assistance-title">Voice input · Soniox</p>
+              <p className="screen-assistance-copy">
+                Toggle recording to dictate. Review the transcript in the composer
+                before sending.
+              </p>
+            </div>
+          </div>
+          <div className="screen-assistance-controls">
+            <label className="screen-source-label" htmlFor="voice-source-kind">
+              Source
+            </label>
+            <select
+              id="voice-source-kind"
+              value={voiceSource}
+              disabled={
+                voicePhase === "connecting" ||
+                voicePhase === "recording" ||
+                voicePhase === "stopping"
+              }
+              onChange={(event) => {
+                if (
+                  event.currentTarget.value === "microphone" ||
+                  event.currentTarget.value === "system_audio"
+                ) {
+                  void setVoiceSource(event.currentTarget.value, microphoneDeviceId);
+                }
+              }}
+            >
+              <option value="microphone">Microphone</option>
+              <option value="system_audio">System audio</option>
+            </select>
+            {voiceSource === "microphone" ? (
+              <>
+                <label className="sr-only" htmlFor="voice-microphone-device">
+                  Microphone device
+                </label>
+                <select
+                  id="voice-microphone-device"
+                  aria-label="Microphone device"
+                  value={microphoneDeviceId ?? ""}
+                  disabled={
+                    voicePhase === "connecting" ||
+                    voicePhase === "recording" ||
+                    voicePhase === "stopping"
+                  }
+                  onChange={(event) => {
+                    void setVoiceSource(
+                      "microphone",
+                      event.currentTarget.value.length > 0
+                        ? event.currentTarget.value
+                        : null,
+                    );
+                  }}
+                >
+                  <option value="">Default microphone</option>
+                  {voiceDevices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="screen-secondary-action"
+                  type="button"
+                  onClick={() => void loadVoiceDevices()}
+                  disabled={
+                    voicePhase === "connecting" ||
+                    voicePhase === "recording" ||
+                    voicePhase === "stopping"
+                  }
+                  aria-label="Refresh microphone list"
+                  title="Refresh microphone list"
+                >
+                  ↻
+                </button>
+              </>
+            ) : null}
+            <button
+              className="screen-capture-action"
+              type="button"
+              onClick={() => {
+                if (voicePhase === "recording") {
+                  void stopVoiceInput();
+                } else {
+                  void startVoiceInput();
+                }
+              }}
+              disabled={voicePhase === "connecting" || voicePhase === "stopping"}
+            >
+              {voicePhase === "connecting"
+                ? "Connecting…"
+                : voicePhase === "recording"
+                  ? "Stop voice input"
+                  : voicePhase === "stopping"
+                    ? "Finalizing…"
+                    : "Start voice input"}
+            </button>
+            {voicePhase === "recording" ? (
+              <span className="screen-permission-hint" role="status">
+                {voiceTranscript.length > 0 ? voiceTranscript : "Listening…"}
+              </span>
+            ) : null}
+          </div>
+          {voiceError !== null ? (
+            <p className="screen-assistance-error" role="alert">
+              {voiceError}
+            </p>
+          ) : null}
+        </section>
         {readiness.phase === "loading" ? (
           <div className="assistant-notice" role="status" aria-live="polite">
             Checking provider and context pack…
@@ -215,8 +408,8 @@ export function AssistantPanel() {
               <p className="state-title">Manual assistance needs setup</p>
               <p className="state-copy">{readiness.message}</p>
               <p className="state-copy">
-                Configure OpenRouter in the desktop process and install a context pack
-                in the application data directory.
+                Configure a text provider in the desktop process and install a context
+                pack in the application data directory.
               </p>
             </div>
           </div>
@@ -249,7 +442,12 @@ export function AssistantPanel() {
                 </p>
               ) : null}
             </div>
-            <section className="screen-assistance" aria-label="Screen assistance">
+            <section
+              className="screen-assistance"
+              aria-label="Screen assistance"
+              ref={screenAssistanceRef}
+              tabIndex={-1}
+            >
               <div className="screen-assistance-heading">
                 <div>
                   <p className="screen-assistance-title">Temporary screen help</p>
@@ -585,12 +783,15 @@ export function AssistantPanel() {
                 id="manual-assistance-input"
                 name="text"
                 rows={2}
-                value={text}
+                value={draftText}
                 maxLength={16 * 1024}
                 placeholder="Write or paste text to work with…"
                 onChange={(event) => {
                   const composer = event.currentTarget;
                   setText(composer.value);
+                  if (finalizedTranscript !== null) {
+                    clearFinalizedTranscript(finalizedTranscript.id);
+                  }
                   composer.style.height = "auto";
                   composer.style.height = `${String(Math.min(composer.scrollHeight, 160))}px`;
                 }}
@@ -617,7 +818,7 @@ export function AssistantPanel() {
                   <button
                     className="assistant-send"
                     type="submit"
-                    disabled={!text.trim() || busy || resetPending}
+                    disabled={!draftText.trim() || busy || resetPending}
                   >
                     {phase === "starting" ? "Starting" : "Send"}
                   </button>
