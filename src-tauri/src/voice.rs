@@ -1,5 +1,6 @@
+#[cfg(any(target_os = "windows", test))]
+use std::collections::VecDeque;
 use std::{
-    collections::VecDeque,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -467,7 +468,16 @@ async fn stop_capture_and_drain_audio(
         tokio::select! {
             result = &mut capture_task => break result,
             audio = audio_receiver.recv() => match audio {
-                Some(audio) => forward_audio_message(writer, audio, failed).await,
+                Some(audio) => {
+                    #[cfg(target_os = "windows")]
+                    if let Some(frame) = forward_audio_message(audio, failed)
+                        && writer.send(Message::Binary(frame.into())).await.is_err()
+                    {
+                        *failed = Some("Soniox connection was interrupted".to_owned());
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    forward_audio_message(audio, failed);
+                }
                 None => receiver_closed = true,
             }
         }
@@ -476,27 +486,29 @@ async fn stop_capture_and_drain_audio(
         failed.get_or_insert_with(|| CaptureError::safe_message().to_owned());
     }
     while let Some(audio) = audio_receiver.recv().await {
-        forward_audio_message(writer, audio, failed).await;
+        #[cfg(target_os = "windows")]
+        if let Some(frame) = forward_audio_message(audio, failed)
+            && writer.send(Message::Binary(frame.into())).await.is_err()
+        {
+            *failed = Some("Soniox connection was interrupted".to_owned());
+        }
+        #[cfg(not(target_os = "windows"))]
+        forward_audio_message(audio, failed);
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = writer;
 }
 
-async fn forward_audio_message(
-    writer: &mut SonioxWriter,
-    audio: AudioMessage,
-    failed: &mut Option<String>,
-) {
+fn forward_audio_message(audio: AudioMessage, failed: &mut Option<String>) -> Option<Vec<u8>> {
     match audio {
         #[cfg(target_os = "windows")]
-        AudioMessage::Frame(frame) if failed.is_none() => {
-            if writer.send(Message::Binary(frame.into())).await.is_err() {
-                *failed = Some("Soniox connection was interrupted".to_owned());
-            }
-        }
+        AudioMessage::Frame(frame) if failed.is_none() => Some(frame),
         AudioMessage::Failed => {
             failed.get_or_insert_with(|| CaptureError::safe_message().to_owned());
+            None
         }
         #[cfg(target_os = "windows")]
-        AudioMessage::Frame(_) => {}
+        AudioMessage::Frame(_) => None,
     }
 }
 
