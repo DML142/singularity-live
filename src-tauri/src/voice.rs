@@ -1,6 +1,9 @@
 #[cfg(any(target_os = "windows", test))]
 use std::collections::VecDeque;
 use std::{
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -13,6 +16,7 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
 };
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 use tokio::{
     net::TcpStream,
     sync::{Mutex, mpsc},
@@ -27,6 +31,7 @@ const SONIOX_MODEL: &str = "stt-rt-v5";
 #[cfg(target_os = "windows")]
 const AUDIO_FRAME_BYTES: usize = 640;
 const SONIOX_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const VOICE_SETTINGS_VERSION: u32 = 1;
 
 type SonioxSocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
@@ -45,6 +50,30 @@ pub enum AudioInputSource {
 pub struct AudioInputDevice {
     pub id: String,
     pub label: String,
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VoiceInputSettings {
+    pub source: AudioInputSource,
+    pub microphone_device_id: Option<String>,
+}
+
+impl Default for VoiceInputSettings {
+    fn default() -> Self {
+        Self {
+            source: AudioInputSource::Microphone,
+            microphone_device_id: None,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct VersionedVoiceInputSettings {
+    version: u32,
+    settings: VoiceInputSettings,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -63,13 +92,12 @@ pub trait VoiceInputEventSink: Send + Sync {
 pub struct VoiceInputService {
     secrets: Arc<dyn SecretStore>,
     events: Arc<dyn VoiceInputEventSink>,
+    settings_path: Option<PathBuf>,
     state: Mutex<VoiceInputState>,
 }
 
-#[derive(Default)]
 struct VoiceInputState {
-    source: Option<AudioInputSource>,
-    microphone_device_id: Option<String>,
+    settings: VoiceInputSettings,
     session: Option<VoiceInputSession>,
 }
 
@@ -81,12 +109,28 @@ struct VoiceInputSession {
 
 impl VoiceInputService {
     #[must_use]
-    pub fn new(secrets: Arc<dyn SecretStore>, events: Arc<dyn VoiceInputEventSink>) -> Self {
+    pub fn new(
+        secrets: Arc<dyn SecretStore>,
+        events: Arc<dyn VoiceInputEventSink>,
+        settings_path: Option<PathBuf>,
+    ) -> Self {
+        let settings = settings_path
+            .as_deref()
+            .and_then(|path| read_voice_settings(path).ok())
+            .unwrap_or_default();
         Self {
             secrets,
             events,
-            state: Mutex::new(VoiceInputState::default()),
+            settings_path,
+            state: Mutex::new(VoiceInputState {
+                settings,
+                session: None,
+            }),
         }
+    }
+
+    pub async fn settings(&self) -> VoiceInputSettings {
+        self.state.lock().await.settings.clone()
     }
 
     /// Sets the source used by the voice shortcut and next capture session.
@@ -107,8 +151,15 @@ impl VoiceInputService {
         {
             return Err(VoiceInputError::Busy);
         }
-        state.source = Some(source);
-        state.microphone_device_id = microphone_device_id;
+        let settings = VoiceInputSettings {
+            source,
+            microphone_device_id,
+        };
+        let Some(path) = self.settings_path.as_deref() else {
+            return Err(VoiceInputError::SettingsUnavailable);
+        };
+        write_voice_settings(path, &settings).map_err(|_| VoiceInputError::SettingsUnavailable)?;
+        state.settings = settings;
         Ok(())
     }
 
@@ -178,8 +229,10 @@ impl VoiceInputService {
             )
             .await;
         });
-        state.source = Some(source);
-        state.microphone_device_id = microphone_device_id;
+        state.settings = VoiceInputSettings {
+            source,
+            microphone_device_id,
+        };
         state.session = Some(VoiceInputSession { active, stop, task });
         Ok(())
     }
@@ -205,8 +258,8 @@ impl VoiceInputService {
                 return;
             }
             (
-                state.source.unwrap_or(AudioInputSource::Microphone),
-                state.microphone_device_id.clone(),
+                state.settings.source,
+                state.settings.microphone_device_id.clone(),
             )
         };
         if let Err(error) = self.start(source, microphone_device_id).await {
@@ -252,6 +305,10 @@ fn list_windows_audio_input_devices() -> Result<Vec<AudioInputDevice>, VoiceInpu
         let count = collection
             .get_nbr_devices()
             .map_err(|_| VoiceInputError::Unavailable)?;
+        let default_device_id = enumerator
+            .get_default_device(&Direction::Capture)
+            .ok()
+            .and_then(|device| device.get_id().ok());
         (0..count)
             .map(|index| {
                 let device = collection
@@ -261,7 +318,14 @@ fn list_windows_audio_input_devices() -> Result<Vec<AudioInputDevice>, VoiceInpu
                 let label = device
                     .get_friendlyname()
                     .map_err(|_| VoiceInputError::Unavailable)?;
-                Ok(AudioInputDevice { id, label })
+                let is_default = default_device_id
+                    .as_ref()
+                    .is_some_and(|default_id| default_id == &id);
+                Ok(AudioInputDevice {
+                    id,
+                    label,
+                    is_default,
+                })
             })
             .collect()
     })();
@@ -274,6 +338,7 @@ pub enum VoiceInputError {
     Busy,
     NotConfigured,
     Unavailable,
+    SettingsUnavailable,
 }
 
 impl VoiceInputError {
@@ -283,8 +348,41 @@ impl VoiceInputError {
             Self::Busy => "Voice input is already active",
             Self::NotConfigured => "Configure SONIOX_API_KEY in pnpm assist to use voice input",
             Self::Unavailable => "Soniox or the selected audio source could not be reached",
+            Self::SettingsUnavailable => "Voice input settings could not be saved",
         }
     }
+}
+
+fn read_voice_settings(path: &Path) -> Result<VoiceInputSettings, io::Error> {
+    let contents = fs::read(path)?;
+    let config: VersionedVoiceInputSettings = serde_json::from_slice(&contents)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if config.version != VOICE_SETTINGS_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unsupported version",
+        ));
+    }
+    Ok(config.settings)
+}
+
+fn write_voice_settings(path: &Path, settings: &VoiceInputSettings) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid settings path"))?;
+    fs::create_dir_all(parent)?;
+    let contents = serde_json::to_vec(&VersionedVoiceInputSettings {
+        version: VOICE_SETTINGS_VERSION,
+        settings: settings.clone(),
+    })
+    .map_err(io::Error::other)?;
+    let mut temporary = NamedTempFile::new_in(parent)?;
+    temporary.write_all(&contents)?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist(path)
+        .map(|_| ())
+        .map_err(|error| error.error)
 }
 
 #[derive(Serialize)]
@@ -771,7 +869,10 @@ fn is_speech(frame: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{VoiceActivityGate, complete_text, update_transcript};
+    use super::{
+        AudioInputSource, VoiceActivityGate, VoiceInputSettings, complete_text,
+        read_voice_settings, update_transcript, write_voice_settings,
+    };
 
     #[test]
     fn replaces_partial_words_and_preserves_final_tokens() {
@@ -812,6 +913,23 @@ mod tests {
         }
         assert_eq!(sent_tail, 19);
         assert!(gate.push(audio_frame(0)).is_empty());
+    }
+
+    #[test]
+    fn persists_voice_source_and_selected_microphone_versioned() {
+        let directory = tempfile::tempdir().expect("temporary settings directory");
+        let path = directory.path().join("voice-input.json");
+        let settings = VoiceInputSettings {
+            source: AudioInputSource::Microphone,
+            microphone_device_id: Some("endpoint-1".to_owned()),
+        };
+
+        write_voice_settings(&path, &settings).expect("voice input settings saved");
+
+        assert_eq!(
+            read_voice_settings(&path).expect("voice input settings load"),
+            settings
+        );
     }
 
     fn audio_frame(sample: i16) -> Vec<u8> {

@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 
 import {
   getAudioInputDevices,
+  getVoiceInputSettings,
   setVoiceInputSource,
   startVoiceInput,
 } from "./voice-input-client";
@@ -15,7 +16,7 @@ describe("voice input IPC client", () => {
   beforeEach(() => invokeMock.mockReset());
 
   it("strictly validates and lists microphone endpoints", async () => {
-    const devices = [{ id: "endpoint-1", label: "USB microphone" }];
+    const devices = [{ id: "endpoint-1", label: "USB microphone", isDefault: true }];
     invokeMock.mockResolvedValue(devices);
 
     await expect(getAudioInputDevices()).resolves.toEqual(devices);
@@ -25,6 +26,19 @@ describe("voice input IPC client", () => {
     await expect(getAudioInputDevices()).rejects.toThrow(
       "Invalid audio input device response",
     );
+  });
+
+  it("loads the persisted audio source and selected microphone", async () => {
+    invokeMock.mockResolvedValue({
+      source: "microphone",
+      microphoneDeviceId: "endpoint-1",
+    });
+
+    await expect(getVoiceInputSettings()).resolves.toEqual({
+      source: "microphone",
+      microphoneDeviceId: "endpoint-1",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("get_voice_input_settings");
   });
 
   it("passes the selected microphone endpoint to Rust for source selection and capture", async () => {

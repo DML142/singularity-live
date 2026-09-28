@@ -22,6 +22,7 @@
     "allow-set-window-opacity",
     "allow-set-voice-input-source",
     "allow-list-audio-input-devices",
+    "allow-get-voice-input-settings",
     "allow-start-voice-input",
     "allow-stop-voice-input",
     "core:event:allow-listen",

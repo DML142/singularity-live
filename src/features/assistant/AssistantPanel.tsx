@@ -11,7 +11,10 @@ import remarkGfm from "remark-gfm";
 
 import { WorkspacePanel } from "../../components/ui/WorkspacePanel";
 import type { CropRect } from "../../lib/tauri/screen-assistance-client";
-import { subscribeQuickSend } from "../../lib/tauri/shortcut-client";
+import {
+  subscribeQuickSend,
+  subscribeScreenshotSend,
+} from "../../lib/tauri/shortcut-client";
 import { useManualAssistanceStore } from "../../stores/manual-assistance-store";
 import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
 import { useVoiceInputStore } from "../../stores/voice-input-store";
@@ -58,14 +61,9 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
     (state) => state.clearForSessionReset,
   );
   const voicePhase = useVoiceInputStore((state) => state.phase);
-  const voiceSource = useVoiceInputStore((state) => state.source);
-  const voiceDevices = useVoiceInputStore((state) => state.devices);
-  const microphoneDeviceId = useVoiceInputStore((state) => state.microphoneDeviceId);
   const voiceTranscript = useVoiceInputStore((state) => state.transcript);
   const voiceError = useVoiceInputStore((state) => state.error);
   const finalizedTranscript = useVoiceInputStore((state) => state.finalizedTranscript);
-  const setVoiceSource = useVoiceInputStore((state) => state.setSource);
-  const loadVoiceDevices = useVoiceInputStore((state) => state.loadDevices);
   const startVoiceInput = useVoiceInputStore((state) => state.start);
   const stopVoiceInput = useVoiceInputStore((state) => state.stop);
   const clearFinalizedTranscript = useVoiceInputStore(
@@ -74,6 +72,7 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const quickSendHandler = useRef<() => void>(() => {});
+  const screenshotSendHandler = useRef<() => void>(() => {});
   const screenAssistanceRef = useRef<HTMLElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const screenshotImageRef = useRef<HTMLImageElement>(null);
@@ -185,6 +184,23 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
     quickSendHandler.current = () => {
       submitPrompt(draftText);
     };
+    screenshotSendHandler.current = () => {
+      const currentScreen = useScreenAssistanceStore.getState();
+      const currentAssistant = useManualAssistanceStore.getState();
+      if (
+        currentScreen.preview !== null &&
+        currentAssistant.turns.some((turn) => turn.phase === "completed") &&
+        currentAssistant.phase !== "starting" &&
+        currentAssistant.phase !== "streaming" &&
+        !currentAssistant.resetPending &&
+        currentScreen.phase !== "loadingTargets" &&
+        currentScreen.phase !== "capturing" &&
+        currentScreen.phase !== "cropping" &&
+        currentScreen.phase !== "sending"
+      ) {
+        void currentScreen.send();
+      }
+    };
   });
 
   useEffect(() => {
@@ -192,6 +208,26 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
     let unlisten: (() => void) | undefined;
     void subscribeQuickSend(() => {
       quickSendHandler.current();
+    })
+      .then((stopListening) => {
+        if (mounted) {
+          unlisten = stopListening;
+        } else {
+          stopListening();
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+    void subscribeScreenshotSend(() => {
+      screenshotSendHandler.current();
     })
       .then((stopListening) => {
         if (mounted) {
@@ -285,118 +321,6 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
   return (
     <WorkspacePanel title="Assistant" detail={detail} className="assistant-panel">
       <div className="assistant-body">
-        <section className="screen-assistance" aria-label="Voice input">
-          <div className="screen-assistance-heading">
-            <div>
-              <p className="screen-assistance-title">Voice input · Soniox</p>
-              <p className="screen-assistance-copy">
-                Toggle recording to dictate. Review the transcript in the composer
-                before sending.
-              </p>
-            </div>
-          </div>
-          <div className="screen-assistance-controls">
-            <label className="screen-source-label" htmlFor="voice-source-kind">
-              Source
-            </label>
-            <select
-              id="voice-source-kind"
-              value={voiceSource}
-              disabled={
-                voicePhase === "connecting" ||
-                voicePhase === "recording" ||
-                voicePhase === "stopping"
-              }
-              onChange={(event) => {
-                if (
-                  event.currentTarget.value === "microphone" ||
-                  event.currentTarget.value === "system_audio"
-                ) {
-                  void setVoiceSource(event.currentTarget.value, microphoneDeviceId);
-                }
-              }}
-            >
-              <option value="microphone">Microphone</option>
-              <option value="system_audio">System audio</option>
-            </select>
-            {voiceSource === "microphone" ? (
-              <>
-                <label className="sr-only" htmlFor="voice-microphone-device">
-                  Microphone device
-                </label>
-                <select
-                  id="voice-microphone-device"
-                  aria-label="Microphone device"
-                  value={microphoneDeviceId ?? ""}
-                  disabled={
-                    voicePhase === "connecting" ||
-                    voicePhase === "recording" ||
-                    voicePhase === "stopping"
-                  }
-                  onChange={(event) => {
-                    void setVoiceSource(
-                      "microphone",
-                      event.currentTarget.value.length > 0
-                        ? event.currentTarget.value
-                        : null,
-                    );
-                  }}
-                >
-                  <option value="">Default microphone</option>
-                  {voiceDevices.map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="screen-secondary-action"
-                  type="button"
-                  onClick={() => void loadVoiceDevices()}
-                  disabled={
-                    voicePhase === "connecting" ||
-                    voicePhase === "recording" ||
-                    voicePhase === "stopping"
-                  }
-                  aria-label="Refresh microphone list"
-                  title="Refresh microphone list"
-                >
-                  ↻
-                </button>
-              </>
-            ) : null}
-            <button
-              className="screen-capture-action"
-              type="button"
-              onClick={() => {
-                if (voicePhase === "recording") {
-                  void stopVoiceInput();
-                } else {
-                  void startVoiceInput();
-                }
-              }}
-              disabled={voicePhase === "connecting" || voicePhase === "stopping"}
-            >
-              {voicePhase === "connecting"
-                ? "Connecting…"
-                : voicePhase === "recording"
-                  ? "Stop voice input"
-                  : voicePhase === "stopping"
-                    ? "Finalizing…"
-                    : "Start voice input"}
-            </button>
-            {voicePhase === "recording" ? (
-              <span className="screen-permission-hint" role="status">
-                {voiceTranscript.length > 0 ? voiceTranscript : "Listening…"}
-              </span>
-            ) : null}
-          </div>
-          {voiceError !== null ? (
-            <p className="screen-assistance-error" role="alert">
-              {voiceError}
-            </p>
-          ) : null}
-        </section>
         {readiness.phase === "loading" ? (
           <div className="assistant-notice" role="status" aria-live="polite">
             Checking provider and context pack…
@@ -798,6 +722,16 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
                 onKeyDown={handleComposerKeyDown}
                 disabled={busy || resetPending}
               />
+              {voicePhase === "recording" ? (
+                <p className="voice-capture-status" role="status">
+                  {voiceTranscript.length > 0 ? voiceTranscript : "Listening…"}
+                </p>
+              ) : null}
+              {voiceError !== null ? (
+                <p className="voice-capture-error" role="alert">
+                  {voiceError}
+                </p>
+              ) : null}
               <div className="composer-footer">
                 <span className="composer-hint">
                   Enter to send · Shift+Enter for a new line
@@ -815,6 +749,27 @@ export function AssistantPanel({ initialTask }: AssistantPanelProps) {
                       {cancelPending ? "Cancelling" : "Cancel"}
                     </button>
                   ) : null}
+                  <button
+                    className="assistant-record"
+                    type="button"
+                    aria-pressed={voicePhase === "recording"}
+                    disabled={voicePhase === "connecting" || voicePhase === "stopping"}
+                    onClick={() => {
+                      if (voicePhase === "recording") {
+                        void stopVoiceInput();
+                      } else {
+                        void startVoiceInput();
+                      }
+                    }}
+                  >
+                    {voicePhase === "connecting"
+                      ? "Connecting…"
+                      : voicePhase === "recording"
+                        ? "Stop"
+                        : voicePhase === "stopping"
+                          ? "Finalizing…"
+                          : "Record"}
+                  </button>
                   <button
                     className="assistant-send"
                     type="submit"

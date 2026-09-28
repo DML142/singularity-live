@@ -6,6 +6,12 @@ export type AudioInputSource = "microphone" | "system_audio";
 export interface AudioInputDevice {
   readonly id: string;
   readonly label: string;
+  readonly isDefault: boolean;
+}
+
+export interface VoiceInputSettings {
+  readonly source: AudioInputSource;
+  readonly microphoneDeviceId: string | null;
 }
 
 export type VoiceInputEvent =
@@ -22,15 +28,17 @@ export async function getAudioInputDevices(): Promise<readonly AudioInputDevice[
   const devices = response.flatMap((value): AudioInputDevice[] => {
     if (
       isRecord(value) &&
-      Object.keys(value).length === 2 &&
+      Object.keys(value).length === 3 &&
       Object.hasOwn(value, "id") &&
       Object.hasOwn(value, "label") &&
+      Object.hasOwn(value, "isDefault") &&
       typeof value.id === "string" &&
       value.id.length > 0 &&
       typeof value.label === "string" &&
-      value.label.length > 0
+      value.label.length > 0 &&
+      typeof value.isDefault === "boolean"
     ) {
-      return [{ id: value.id, label: value.label }];
+      return [{ id: value.id, label: value.label, isDefault: value.isDefault }];
     }
     return [];
   });
@@ -38,6 +46,25 @@ export async function getAudioInputDevices(): Promise<readonly AudioInputDevice[
     throw new Error("Invalid audio input device response");
   }
   return devices;
+}
+
+export async function getVoiceInputSettings(): Promise<VoiceInputSettings> {
+  const response: unknown = await invoke("get_voice_input_settings");
+  if (
+    !isRecord(response) ||
+    Object.keys(response).length !== 2 ||
+    !Object.hasOwn(response, "source") ||
+    !Object.hasOwn(response, "microphoneDeviceId") ||
+    (response.source !== "microphone" && response.source !== "system_audio") ||
+    (response.microphoneDeviceId !== null &&
+      typeof response.microphoneDeviceId !== "string")
+  ) {
+    throw new Error("Invalid voice input settings response");
+  }
+  return {
+    source: response.source,
+    microphoneDeviceId: response.microphoneDeviceId,
+  };
 }
 
 export async function setVoiceInputSource(

@@ -22,6 +22,7 @@ const client = vi.hoisted(() => ({
   screenDiscard: vi.fn(),
   screenshotSend: vi.fn(),
   subscribeQuickSend: vi.fn<(callback: () => void) => Promise<() => void>>(),
+  subscribeScreenshotSend: vi.fn<(callback: () => void) => Promise<() => void>>(),
 }));
 
 vi.mock("../../lib/tauri/manual-assistance-client", () => ({
@@ -47,6 +48,7 @@ vi.mock("../../lib/tauri/screen-assistance-client", () => ({
 }));
 vi.mock("../../lib/tauri/shortcut-client", () => ({
   subscribeQuickSend: client.subscribeQuickSend,
+  subscribeScreenshotSend: client.subscribeScreenshotSend,
 }));
 
 let receiveEvent: ((event: ManualAssistanceEvent) => void) | undefined;
@@ -74,6 +76,7 @@ describe("manual assistant panel", () => {
     client.screenDiscard.mockReset();
     client.screenshotSend.mockReset();
     client.subscribeQuickSend.mockReset().mockResolvedValue(vi.fn());
+    client.subscribeScreenshotSend.mockReset().mockResolvedValue(vi.fn());
     receiveEvent = undefined;
     client.getReadiness.mockResolvedValue({
       status: "ready",
@@ -134,7 +137,7 @@ describe("manual assistant panel", () => {
     useVoiceInputStore.setState({
       phase: "idle",
       source: "microphone",
-      devices: [{ id: "usb-mic", label: "USB microphone" }],
+      devices: [{ id: "usb-mic", label: "USB microphone", isDefault: true }],
       microphoneDeviceId: null,
       transcript: "",
       error: null,
@@ -252,19 +255,56 @@ describe("manual assistant panel", () => {
     });
   });
 
-  it("offers an enumerated microphone and keeps the selected device", async () => {
-    render(<AssistantPanel />);
-    const microphone = await screen.findByRole("combobox", {
-      name: "Microphone device",
+  it("sends the reviewed screenshot when the screenshot-send shortcut fires", async () => {
+    useManualAssistanceStore.setState({
+      readiness: {
+        phase: "ready",
+        value: {
+          status: "ready",
+          provider: "open_router",
+          model: "openrouter/free",
+          contextPack: "fictional",
+        },
+      },
+      phase: "completed",
+      turns: [
+        {
+          id: 1,
+          prompt: "Explain this code",
+          answer: "Here is the explanation",
+          phase: "completed",
+          error: null,
+        },
+      ],
     });
+    render(<AssistantPanel />);
+    await screen.findByRole("button", { name: "Choose source" });
+    useScreenAssistanceStore.setState({ phase: "preview", preview: screenshot });
+    await waitFor(() => {
+      expect(client.subscribeScreenshotSend).toHaveBeenCalled();
+    });
+    const screenshotSendHandler = client.subscribeScreenshotSend.mock.calls[0]?.[0];
+    if (screenshotSendHandler === undefined) {
+      throw new Error("The screenshot-send shortcut listener was not registered");
+    }
 
-    expect(microphone).toHaveDisplayValue("Default microphone");
-    expect(screen.getByRole("option", { name: "USB microphone" })).toBeInTheDocument();
-    fireEvent.change(microphone, { target: { value: "usb-mic" } });
+    act(() => {
+      screenshotSendHandler();
+    });
 
     await waitFor(() => {
-      expect(useVoiceInputStore.getState().microphoneDeviceId).toBe("usb-mic");
+      expect(client.screenshotSend).toHaveBeenCalledWith(screenshot.captureId);
     });
+  });
+
+  it("puts voice recording beside Send in the composer", async () => {
+    render(<AssistantPanel />);
+    const record = await screen.findByRole("button", { name: "Record" });
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(
+      record.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Microphone device" })).toBeNull();
   });
 
   it("keeps both sides of each exchange visible without sending prior turns again", async () => {

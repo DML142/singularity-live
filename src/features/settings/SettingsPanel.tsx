@@ -15,6 +15,7 @@ import {
   type ShortcutAction,
   type ShortcutChord,
 } from "../../lib/tauri/shortcut-client";
+import { useVoiceInputStore } from "../../stores/voice-input-store";
 import { recordedShortcutFromEvent } from "./key-chord";
 
 interface SettingsPanelProps {
@@ -22,7 +23,9 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ onBack }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<"binds" | "customization">("binds");
+  const [activeTab, setActiveTab] = useState<"binds" | "audio" | "customization">(
+    "binds",
+  );
   const [views, setViews] = useState<readonly ShortcutBindingView[]>([]);
   const [drafts, setDrafts] = useState<readonly ShortcutBinding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,12 +139,18 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
         <div>
           <p className="settings-eyebrow">Settings</p>
           <h2 id="settings-heading">
-            {activeTab === "binds" ? "Binds" : "Customization"}
+            {activeTab === "binds"
+              ? "Binds"
+              : activeTab === "audio"
+                ? "Audio input"
+                : "Customization"}
           </h2>
           <p className="settings-description">
             {activeTab === "binds"
-              ? "Configure screenshot capture, voice input, and quick send shortcuts. Changes take effect after saving."
-              : "Adjust how much of your desktop shows through the assistant window."}
+              ? "Configure capture, screenshot send, hide/show, voice input, and quick-send shortcuts."
+              : activeTab === "audio"
+                ? "Choose the microphone or system audio source used by voice transcription."
+                : "Adjust how much of your desktop shows through the assistant window."}
           </p>
         </div>
         <button className="settings-back-button" type="button" onClick={onBack}>
@@ -167,6 +176,19 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
           className="settings-tab"
           type="button"
           role="tab"
+          id="settings-tab-audio"
+          aria-controls="settings-panel-audio"
+          aria-selected={activeTab === "audio"}
+          onClick={() => {
+            setActiveTab("audio");
+          }}
+        >
+          Audio
+        </button>
+        <button
+          className="settings-tab"
+          type="button"
+          role="tab"
           id="settings-tab-customization"
           aria-controls="settings-panel-customization"
           aria-selected={activeTab === "customization"}
@@ -180,6 +202,8 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
 
       {activeTab === "customization" ? (
         <CustomizationSettings />
+      ) : activeTab === "audio" ? (
+        <AudioSettings />
       ) : loading ? (
         <p className="settings-status" role="status">
           Loading shortcut bindings…
@@ -234,6 +258,8 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                       onChange={(event) => {
                         if (
                           event.currentTarget.value === "screenshot" ||
+                          event.currentTarget.value === "screenshot_send" ||
+                          event.currentTarget.value === "toggle_taskbar_icon" ||
                           event.currentTarget.value === "voice_input" ||
                           event.currentTarget.value === "quick_send"
                         ) {
@@ -242,6 +268,10 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                       }}
                     >
                       <option value="screenshot">Screenshot</option>
+                      <option value="screenshot_send">Send screenshot</option>
+                      <option value="toggle_taskbar_icon">
+                        Hide / show taskbar icon
+                      </option>
                       <option value="voice_input">
                         Voice input · toggle recording
                       </option>
@@ -326,6 +356,98 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
         </div>
       )}
     </section>
+  );
+}
+
+function AudioSettings() {
+  const source = useVoiceInputStore((state) => state.source);
+  const devices = useVoiceInputStore((state) => state.devices);
+  const microphoneDeviceId = useVoiceInputStore((state) => state.microphoneDeviceId);
+  const phase = useVoiceInputStore((state) => state.phase);
+  const error = useVoiceInputStore((state) => state.error);
+  const setSource = useVoiceInputStore((state) => state.setSource);
+  const loadDevices = useVoiceInputStore((state) => state.loadDevices);
+  const recording =
+    phase === "connecting" || phase === "recording" || phase === "stopping";
+
+  return (
+    <div
+      id="settings-panel-audio"
+      className="customization-panel"
+      role="tabpanel"
+      aria-labelledby="settings-tab-audio"
+    >
+      <section className="customization-card" aria-labelledby="audio-input-heading">
+        <div>
+          <h3 id="audio-input-heading">Voice input</h3>
+          <p className="settings-description">
+            The selected source is transcribed to text. Recording starts and stops from
+            the chat composer.
+          </p>
+        </div>
+        <label className="audio-device-control">
+          Source
+          <select
+            aria-label="Audio source"
+            value={source}
+            disabled={recording}
+            onChange={(event) => {
+              if (
+                event.currentTarget.value === "microphone" ||
+                event.currentTarget.value === "system_audio"
+              ) {
+                void setSource(event.currentTarget.value, microphoneDeviceId);
+              }
+            }}
+          >
+            <option value="microphone">Microphone</option>
+            <option value="system_audio">System audio</option>
+          </select>
+        </label>
+        {source === "microphone" ? (
+          <label className="audio-device-control">
+            Microphone
+            <select
+              aria-label="Microphone device"
+              value={microphoneDeviceId ?? ""}
+              disabled={recording}
+              onChange={(event) => {
+                void setSource(
+                  "microphone",
+                  event.currentTarget.value.length > 0
+                    ? event.currentTarget.value
+                    : null,
+                );
+              }}
+            >
+              <option value="">Default microphone</option>
+              {devices.map((device) => (
+                <option key={device.id} value={device.id}>
+                  {device.label}
+                  {device.isDefault ? " · default" : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              className="settings-add-button"
+              type="button"
+              onClick={() => void loadDevices()}
+              disabled={recording}
+            >
+              Refresh devices
+            </button>
+          </label>
+        ) : null}
+        <p className="settings-status" role="status">
+          Device selection is saved automatically.
+        </p>
+        {error !== null ? (
+          <p className="settings-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </section>
+    </div>
   );
 }
 

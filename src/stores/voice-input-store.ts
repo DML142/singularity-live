@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import {
   setVoiceInputSource,
+  getVoiceInputSettings,
   getAudioInputDevices,
   startVoiceInput,
   stopVoiceInput,
@@ -28,6 +29,7 @@ interface VoiceInputState {
   readonly finalizedTranscript: FinalizedTranscript | null;
   readonly initialize: () => Promise<() => void>;
   readonly loadDevices: () => Promise<void>;
+  readonly loadConfiguration: () => Promise<void>;
   readonly setSource: (
     source: AudioInputSource,
     microphoneDeviceId: string | null,
@@ -60,7 +62,7 @@ export const useVoiceInputStore = create<VoiceInputState>((set, get) => ({
       const unlisten = await subscribeVoiceInputEvents((event) => {
         get().handleEvent(event);
       });
-      void get().loadDevices();
+      void get().loadConfiguration();
       return unlisten;
     } catch {
       return () => {};
@@ -73,13 +75,28 @@ export const useVoiceInputStore = create<VoiceInputState>((set, get) => ({
       set({ error: "Available microphones could not be listed" });
     }
   },
+  loadConfiguration: async () => {
+    try {
+      const [settings, devices] = await Promise.all([
+        getVoiceInputSettings(),
+        getAudioInputDevices(),
+      ]);
+      set({
+        source: settings.source,
+        microphoneDeviceId: settings.microphoneDeviceId,
+        devices,
+      });
+    } catch {
+      set({ error: "Voice input settings or audio devices could not be loaded" });
+    }
+  },
   setSource: async (source, microphoneDeviceId) => {
     if (get().phase === "recording" || get().phase === "connecting") {
       return;
     }
-    set({ source, microphoneDeviceId, error: null });
     try {
       await setVoiceInputSource(source, microphoneDeviceId);
+      set({ source, microphoneDeviceId, error: null });
     } catch {
       set({ error: "The selected audio source could not be saved" });
     }
