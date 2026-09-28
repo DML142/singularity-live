@@ -7,7 +7,8 @@ use uuid::Uuid;
 use xcap::{Monitor, Window, XCapError, image::RgbaImage};
 
 use super::cursor::{
-    CursorPositionProvider, MonitorResolver, PlatformCursorPositionProvider, XCapMonitorResolver,
+    CursorPosition, CursorPositionProvider, MonitorResolver, PlatformCursorPositionProvider,
+    XCapMonitorResolver,
 };
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -163,6 +164,21 @@ pub trait CaptureBackend: Send + Sync {
         Err(unavailable_error())
     }
 
+    async fn target_under_pointer(
+        &self,
+        kind: CaptureTargetKind,
+    ) -> Result<CaptureTarget, CaptureError> {
+        match kind {
+            CaptureTargetKind::Monitor => self.monitor_under_cursor().await,
+            CaptureTargetKind::Window => self
+                .targets(kind)
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(unavailable_error),
+        }
+    }
+
     async fn target_by_id(&self, id: &str) -> Result<CaptureTarget, CaptureError> {
         for kind in [CaptureTargetKind::Monitor, CaptureTargetKind::Window] {
             if let Some(target) = self
@@ -290,6 +306,54 @@ impl CaptureBackend for XCapCaptureBackend {
         let position = PlatformCursorPositionProvider.position()?;
         XCapMonitorResolver.resolve(position)
     }
+
+    async fn target_under_pointer(
+        &self,
+        kind: CaptureTargetKind,
+    ) -> Result<CaptureTarget, CaptureError> {
+        match kind {
+            CaptureTargetKind::Monitor => self.monitor_under_cursor().await,
+            CaptureTargetKind::Window => {
+                let position = PlatformCursorPositionProvider.position()?;
+                window_under_pointer(position)
+            }
+        }
+    }
+}
+
+fn window_under_pointer(position: CursorPosition) -> Result<CaptureTarget, CaptureError> {
+    let windows = Window::all().map_err(map_xcap_error)?;
+    windows
+        .into_iter()
+        .find_map(|window| {
+            let id = window.id().ok()?;
+            let title = window.title().ok()?;
+            let minimized = window.is_minimized().ok()?;
+            if title.trim().is_empty() || title == "Singularity Live" || minimized {
+                return None;
+            }
+            let x = window.x().ok()?;
+            let y = window.y().ok()?;
+            let width = window.width().ok()?;
+            let height = window.height().ok()?;
+            point_inside_window(position, x, y, width, height).then_some(CaptureTarget {
+                id: format!("window:{id}"),
+                label: title,
+                kind: CaptureTargetKind::Window,
+            })
+        })
+        .ok_or_else(unavailable_error)
+}
+
+fn point_inside_window(position: CursorPosition, x: i32, y: i32, width: u32, height: u32) -> bool {
+    let left = i64::from(x);
+    let top = i64::from(y);
+    let position_x = i64::from(position.x);
+    let position_y = i64::from(position.y);
+    position_x >= left
+        && position_x < left + i64::from(width)
+        && position_y >= top
+        && position_y < top + i64::from(height)
 }
 
 #[must_use]

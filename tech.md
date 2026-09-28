@@ -17,8 +17,9 @@ captured microphone or Windows system audio converted to text. The assistant ret
 only. Voice input is a way to provide context, not a request for spoken AI replies.
 
 Keeping the assistant window out of supported screen-capture output while leaving it visible
-and usable to the creator is a required product capability and release gate. It is distinct
-from briefly hiding the window while this application captures its own screenshot.
+and usable to the creator is a required product capability and release gate. Screenshot
+capture can optionally hide the window; Windows content protection normally excludes it
+without hiding it.
 
 ### Terminology
 
@@ -124,8 +125,10 @@ React owns:
 - local interaction and focused UI state;
 - the manual request composer, incremental rendering of backend event streams, and a new
   session action that clears the visible conversation only after Rust confirms reset;
-- visible screen-assistance capability and permission states, explicit source selection and
-  capture, temporary preview/crop, and separate send or discard actions;
+- visible screen-assistance capability and permission states, screenshot messages in the
+  conversation, temporary crop and discard controls, and a composer for screenshot notes;
+- one selected English context action shown as a non-editable prefix in the composer;
+- minmode presentation toggled by a configurable global shortcut;
 - explicit shortcut-binding edits and chord recording, plus hotkey-capture preview/error
   presentation;
 - voice-source and microphone-device selection in Settings → Audio, a Record/Stop control in
@@ -153,19 +156,20 @@ Rust owns:
 - filesystem and platform paths;
 - microphone, system-audio loopback, and screen capture;
 - persistence and context loading, including Rust-owned customization settings;
-- image preprocessing, microphone enumeration, versioned audio and shortcut settings, native
-  shortcut registration, system tray and taskbar-icon visibility lifecycle, cursor-to-monitor
-  resolution, and capture-window lifecycle;
+- image preprocessing, microphone enumeration, versioned audio, shortcut, and customization
+  settings, native shortcut registration, system tray and taskbar-icon visibility lifecycle,
+  cursor-to-screen/window resolution, and optional capture-window lifecycle;
 - safe error mapping and structured technical logging.
 
 Rust exposes `get_app_status`, the manual-assistance commands, narrow screen-assistance
 commands for capability reporting, target listing, explicit capture, capture cancellation,
-crop, discard, and screenshot-assisted requests, and voice commands for persisted source
+crop, discard, screenshot-assisted requests, and screenshot preferences, plus voice commands for persisted source
 selection, active microphone enumeration, explicit start/stop, and `get_voice_input_settings`.
-It also exposes typed `get_shortcut_bindings`, `update_shortcut_bindings`, `get_window_opacity`, and
-`set_window_opacity` commands. The native shortcut callback dispatches Screenshot, Voice input,
-and taskbar-icon visibility directly in Rust and emits narrow quick-send and screenshot-send events for
-the mounted composer; send actions do not restore a minimized window. A system-tray icon with
+It also exposes typed `get_shortcut_bindings`, `update_shortcut_bindings`, `get_window_opacity`,
+`set_window_opacity`, `get_screenshot_preferences`, and `set_screenshot_preferences`
+commands. The native shortcut callback dispatches Screenshot, Voice input, and taskbar-icon
+visibility directly in Rust and emits minmode, quick-send, and screenshot-send events for the
+mounted composer; send actions do not restore a minimized window. A system-tray icon with
 Show/Hide/Quit keeps the window reachable while hidden; the operating system chooses whether to
 place the icon in the notification area or its overflow. `SessionService` validates text, selects
 relevant static context, composes bounded system and role-tagged conversation messages,
@@ -186,12 +190,13 @@ HTTP proxy, or SQL endpoint.
 Tauri capabilities grant only application commands declared in the Rust build manifest;
 the main window receives application and manual-assistance permissions, the screen commands
 `get_screen_capture_capabilities`, `list_screen_capture_targets`,
-`start_screen_capture`, `cancel_screen_capture`, `crop_screen_capture`,
-`discard_screen_capture`, and `start_screenshot_assistance`, and the shortcut settings
+`start_screen_capture`, `capture_screen_from_ui`, `cancel_ui_screen_capture`,
+`cancel_screen_capture`, `crop_screen_capture`, `discard_screen_capture`, and
+`start_screenshot_assistance`, and the shortcut settings
 commands `get_shortcut_bindings` and `update_shortcut_bindings`, plus `set_voice_input_source`,
 `list_audio_input_devices`, `get_voice_input_settings`, `start_voice_input`, `stop_voice_input`,
-`get_window_opacity`, and
-`set_window_opacity`. It also receives
+`get_window_opacity`, `set_window_opacity`, `get_screenshot_preferences`, and
+`set_screenshot_preferences`. It also receives
 `core:event:allow-listen` and `core:event:allow-unlisten` for the streaming UI, and no plugin
 permissions. Provider keys never enter Vite environment variables, localStorage, Zustand,
 logs, or IPC requests or responses. The current `EnvironmentSecretStore` is for local
@@ -249,13 +254,14 @@ Context selection is layered:
 
 The current deterministic selector preserves manifest order and includes `always_include`
 documents plus documents whose configured complete keyword or phrase occurs in the text
-request or the prior text intent for a screenshot. It avoids sending non-matching documents.
+request or the prior text intent for a legacy screenshot follow-up. New screenshot messages
+use their current note to select static context. It avoids sending non-matching documents.
 A Rust-owned session also includes
 prior successful user and assistant messages in chronological order and automatically
 compacts older turns into a rolling summary when recent history exceeds either bound. A
-screenshot follow-up selects static context using the most recent text intent, includes prior
-role-tagged messages, and sends the current image only in that request. Completed history and
-rolling summaries retain text only. Captured audio is not part of session history; a transcript
+screenshot message selects static context using its note, includes prior role-tagged messages,
+and sends the current image only in that request. Completed history and rolling summaries
+retain text only. Captured audio is not part of session history; a transcript
 enters through the same editable text composer and explicit send action as typed text.
 
 ## 11. Session architecture
@@ -319,18 +325,22 @@ or measured latency data. Real device and live-provider checks are pending.
 
 ## 14. Screenshot assistance
 
-Capture runs in Rust after an explicit user action. XCap provides one-shot monitor and window
-capture on Windows, macOS, and X11. Linux Wayland uses the visible XDG ScreenCast picker and
-one PipeWire frame with portal persistence disabled; unsupported backends report that state.
-Region selection crops the reviewed in-memory preview. Rust bounds dimensions and encoded
-size, while the UI displays a temporary preview and requires a separate send action.
+Capture runs in Rust after an explicit user action. A Rust-owned preference chooses the screen
+or window under the pointer and whether to hide the assistant while capturing. Hiding is off
+by default. XCap provides one-shot monitor and window capture on Windows, macOS, and X11.
+Linux Wayland uses the visible XDG ScreenCast picker and one PipeWire frame with portal
+persistence disabled; unsupported backends report that state. Region selection crops the
+reviewed in-memory preview. Rust bounds dimensions and encoded size. The preview appears in
+the conversation and can be cropped, annotated with text, and sent with one selected prompt
+prefix: `explain`, `tell me more`, or `fix`.
 
 One image remains in an in-memory Rust store for no more than five minutes. Send, discard,
 replacement, reset, cancellation, processing errors, expiry, and process exit release its
-bytes. The provider request combines it with the previous text intent and role-tagged text
-context, while completed session history keeps text only. Images and preview data are never
-persisted or logged. OCR is deferred until benchmarks show a benefit for indexing, local
-extraction, or cost reduction.
+bytes. The provider request combines it with the current screenshot note and role-tagged text
+context; a preceding text question is not required. Completed session history keeps text only.
+The UI may display its in-memory preview in the current conversation until the capture expiry,
+reset, or unmount. Images and preview data are never persisted or logged. OCR is deferred
+until benchmarks show a benefit for indexing, local extraction, or cost reduction.
 
 ## 15. Testing strategy
 
@@ -476,28 +486,28 @@ global shortcuts while the application is running.
 
 **Scope:** Rust-owned shortcut registration and versioned non-secret bind settings; a Binds
 view for recording, clearing, adding, removing, and saving screenshot, screenshot-send,
-taskbar-icon toggle, voice-input toggle, and quick-send shortcuts; quick send of the current composer
-draft and sending a reviewed screenshot without restoring a minimized window; a system-tray
-Show/Hide/Quit menu; monitor-under-pointer capture on native desktops and the existing
-consent-driven source picker on Wayland; always-on-top hide/capture/restore coordination; and
-an optional development launcher.
+taskbar-icon toggle, voice-input toggle, quick-send, and minmode shortcuts; quick send of the
+current composer draft and sending a reviewed screenshot without restoring a minimized window;
+a system-tray Show/Hide/Quit menu; monitor/window-under-pointer capture on native desktops and
+the existing consent-driven source picker on Wayland; optional close-on-capture coordination;
+and an optional development launcher.
 
 **Out of scope:** OCR, persistent screenshot data, stored API keys, launch-at-login behavior,
-and actions other than Screenshot, Send screenshot, Hide/show taskbar icon, Voice input, and Quick
-send.
+and actions other than Screenshot, Send screenshot, Hide/show taskbar icon, Voice input, Quick
+send, and Minmode.
 
 **Acceptance criteria:** Screenshot, voice toggle, and quick send work while the app is active
 or minimized; quick send uses the current composer draft and leaves the window minimized; the
-app is hidden from this app's own screenshot and returns above other windows; binding edits
-validate and roll back safely; preview remains temporary and is sent only by explicit user
+capture uses the saved source and optional close-on-capture preference; binding edits validate
+and roll back safely; preview remains temporary and is sent only by explicit user
 action; the dev launcher does not echo or persist credentials; automated tests pass; and manual
 desktop smoke checks pass on supported operating systems.
 
-**Status:** In progress — implementation and automated validation are complete. Manual desktop
-smoke checks for active/minimized activation, tray restore, quick send while minimized,
-always-on-top restore, capture without self-inclusion, and platform permission flows have not
-yet been recorded. Shortcut actions are covered by the Rust registration boundary; real
-global-key smoke checks remain pending.
+**Status:** In progress — earlier shortcut implementation and automated validation are
+recorded. The new minmode and screenshot-composition changes have not yet been validated.
+Manual desktop smoke checks for active/minimized activation, tray restore, quick send while
+minimized, always-on-top restore, capture source/visibility behavior, and platform permission
+flows remain pending.
 
 ### Phase 2.6 — Broadcast capture protection
 
@@ -506,8 +516,8 @@ contents from supported screen recordings and broadcasts.
 
 **Scope:** Enable Tauri `contentProtected` on the Windows main window; document platform
 support and verify the output with supported screen-capture sources. This protects the
-assistant window in external capture. Phase 2.5's hide/capture/restore sequence remains the
-separate mechanism for this app's own screenshot workflow.
+assistant window in external capture. Phase 2.5 can optionally hide the window for this app's
+own screenshot workflow; that preference defaults to off.
 
 **Out of scope:** Hiding the application from the creator, camera-based recording, DRM or
 security guarantees, and claiming support for capture backends that have not been verified.
@@ -637,25 +647,28 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
   reset lifecycle that rejects active requests.
 - Accessible **New session** action that waits for Rust reset confirmation before clearing
   visible turns and preserves the conversation with a safe error if reset fails.
-- Explicit screen assistance with capability and permission states, monitor/window target
-  selection, validated region crop, in-memory preview, separate send/discard actions, and
+- Explicit screen assistance with capability and permission states, monitor/window capture,
+  validated region crop, in-memory preview, screenshot composition in the conversation, and
   cleanup on expiry, reset, unmount, errors, and cancellation.
 - Rust-only platform capture adapters, bounded image preparation, a five-minute transient
   image store, request-scoped image parts through the provider-neutral router, and OpenRouter
   and Gemini image mappings that preserve text-only request compatibility.
-- Versioned screenshot, screenshot-send, taskbar-icon toggle, voice-input, and quick-send bindings,
+- Versioned screenshot, screenshot-send, taskbar-icon toggle, voice-input, quick-send, and
+  minmode bindings,
   transactional native shortcut registration and Wayland portal integration,
-  monitor-under-pointer capture coordination, an always-on-top window lifecycle, system tray,
+  monitor/window-under-pointer capture coordination, an always-on-top window lifecycle, system tray,
   and Settings → Binds.
 - Rust-owned Soniox real-time speech transcription, a local RMS energy gate, Windows
   microphone enumeration and selection plus system-audio capture through WASAPI, live
   transcription in the composer, and explicit insertion after stopping.
 - A full-width chat layout without the Session sidebar or separate Transcript panel, screenshot
-  controls above the scrolling conversation, a composer Record/Stop button, and Settings → Audio
-  and Customization
+  messages and crop controls in the conversation, selectable context prefixes, a composer
+  Record/Stop button, and Settings → Audio and Customization
   with a Rust-persisted, adjustable app-window opacity.
 - Direct OpenAI GPT-6 Luna text and screenshot streaming alongside the OpenRouter and Gemini
   adapters; OpenAI, Soniox, Gemini, and OpenRouter keys stay in the desktop environment.
+- A minmode bind that hides app chrome while keeping the conversation and composer visible.
+- Rust-persisted screenshot source selection and the optional “Close window on screenshot” setting.
 - Windows-specific Tauri `contentProtected` configuration for the main window. Its behavior
   with real OBS display and window capture still needs manual smoke validation.
 - A development-only interactive/argument launcher with numbered workflow, model, and
@@ -683,7 +696,7 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 ### Architecturally planned, not implemented
 
 OS-backed credential storage, multiple chats, persisted session history, reconnecting long
-audio streams, OCR, SQLite, history management, compact mode, updater, signing, and
+audio streams, OCR, SQLite, history management, updater, signing, and
 production packaging.
 
 ### Phase 0 validation record
@@ -811,6 +824,7 @@ current stable compatible direct versions:
 - [ADR 0008: Windows broadcast capture protection](docs/adr/0008-windows-broadcast-capture-protection.md)
 - [ADR 0009: OpenAI generation and Soniox voice transcription](docs/adr/0009-openai-soniox-providers.md)
 - [ADR 0010: Transparent window opacity customization](docs/adr/0010-transparent-window-opacity.md)
+- [ADR 0011: Screenshot messages and minmode](docs/adr/0011-screenshot-messages-and-minmode.md)
 
 Future ADRs are created only for decisions that need durable context, including the secret
 store, SQLite/migration strategy, VAD implementation, and materially changed platform

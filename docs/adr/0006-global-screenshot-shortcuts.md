@@ -35,10 +35,10 @@ Linux Wayland does not expose the X11 global-shortcut backend used by the Tauri 
   appears directly in the notification area or in its overflow menu.
 - Keep the selected voice source and microphone endpoint in a separate versioned Rust-owned
   settings file. The settings screen selects the source; the composer starts and stops capture.
-- Screenshot activation rejects overlapping work, hides the main window, captures one
-  monitor frame, restores the window with always-on-top enabled, then publishes the existing
-  temporary preview. Capture errors, cancellation, or restore failures clear transient image
-  data and produce safe UI state. Capture never sends automatically.
+- Screenshot activation rejects overlapping work and uses the saved monitor/window source
+  preference. It hides and restores the main window only when the close-on-screenshot setting
+  is enabled; this setting is off by default. Capture errors, cancellation, or restore failures
+  clear transient image data and produce safe UI state. Capture never sends automatically.
 - Voice-input activation toggles explicit microphone or system-audio transcription. It never
   submits a transcript to text generation automatically. Quick send only submits the current
   composer draft and is a separate configurable action.
@@ -49,10 +49,11 @@ Linux Wayland does not expose the X11 global-shortcut backend used by the Tauri 
 ## Consequences
 
 The feature reuses existing capture and voice-input services without adding image/audio
-persistence or a second capture path. Native hotkeys and the tray icon work only while the
-application process is running. Quick send and screenshot send rely on the mounted WebView
-composer receiving events; neither implicitly captures or restores a minimized window. Wayland
-may require user-visible portal consent and can choose an effective trigger different from the
+persistence or a second capture path. The assistant can remain visible during capture on
+Windows where content protection excludes it from supported screen-capture APIs. Native hotkeys
+and the tray icon work only while the application process is running. Quick send and screenshot
+send rely on the mounted WebView composer receiving events; neither implicitly captures or
+restores a minimized window. Wayland may require user-visible portal consent and can choose an effective trigger different from the
 requested one. Wayland sessions without a GlobalShortcuts portal cannot
 register binds; users need a supported portal backend or an X11 session. Cross-platform desktop
 smoke checks are required before this roadmap item is marked complete.

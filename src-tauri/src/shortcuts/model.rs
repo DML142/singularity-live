@@ -43,6 +43,7 @@ pub enum ShortcutAction {
     ToggleTaskbarIcon,
     VoiceInput,
     QuickSend,
+    MinMode,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -254,6 +255,7 @@ impl ShortcutBindings {
             ),
             ShortcutBinding::new(ShortcutAction::VoiceInput, None),
             ShortcutBinding::new(ShortcutAction::QuickSend, None),
+            ShortcutBinding::new(ShortcutAction::MinMode, None),
         ]
     }
 }

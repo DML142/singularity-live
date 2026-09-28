@@ -44,6 +44,8 @@ fn main_window_can_use_only_the_explicit_screen_assistance_commands() {
         "allow-list-screen-capture-targets",
         "allow-start-screen-capture",
         "allow-cancel-screen-capture",
+        "allow-capture-screen-from-ui",
+        "allow-cancel-ui-screen-capture",
         "allow-crop-screen-capture",
         "allow-discard-screen-capture",
         "allow-start-screenshot-assistance",
@@ -92,6 +94,14 @@ fn main_window_can_select_microphones_and_update_window_appearance() {
         ("allow-get-voice-input-settings", "get_voice_input_settings"),
         ("allow-get-window-opacity", "get_window_opacity"),
         ("allow-set-window-opacity", "set_window_opacity"),
+        (
+            "allow-get-screenshot-preferences",
+            "get_screenshot_preferences",
+        ),
+        (
+            "allow-set-screenshot-preferences",
+            "set_screenshot_preferences",
+        ),
     ] {
         assert!(
             permissions.iter().any(|value| value == permission),

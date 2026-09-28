@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 
 import {
   DEFAULT_WINDOW_OPACITY,
+  getScreenshotPreferences,
   getWindowOpacity,
+  setScreenshotPreferences,
   setWindowOpacity,
+  type ScreenshotPreferences,
 } from "../../lib/tauri/customization-client";
 import {
   formatShortcutChord,
@@ -16,6 +19,7 @@ import {
   type ShortcutChord,
 } from "../../lib/tauri/shortcut-client";
 import { useVoiceInputStore } from "../../stores/voice-input-store";
+import { useScreenAssistanceStore } from "../../stores/screen-assistance-store";
 import { recordedShortcutFromEvent } from "./key-chord";
 
 interface SettingsPanelProps {
@@ -261,7 +265,8 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                           event.currentTarget.value === "screenshot_send" ||
                           event.currentTarget.value === "toggle_taskbar_icon" ||
                           event.currentTarget.value === "voice_input" ||
-                          event.currentTarget.value === "quick_send"
+                          event.currentTarget.value === "quick_send" ||
+                          event.currentTarget.value === "min_mode"
                         ) {
                           updateAction(binding.id, event.currentTarget.value);
                         }
@@ -276,6 +281,7 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                         Voice input · toggle recording
                       </option>
                       <option value="quick_send">Send current message</option>
+                      <option value="min_mode">Toggle minmode</option>
                     </select>
                   </label>
                   <div className="shortcut-chord-controls">
@@ -457,7 +463,21 @@ function CustomizationSettings() {
   const [loadingOpacity, setLoadingOpacity] = useState(true);
   const [savingOpacity, setSavingOpacity] = useState(false);
   const [opacityError, setOpacityError] = useState<string | null>(null);
+  const [screenshotPreferences, setScreenshotPreferencesState] =
+    useState<ScreenshotPreferences>({
+      closeWindowOnScreenshot: false,
+      targetKind: "monitor",
+    });
+  const [loadingScreenshotPreferences, setLoadingScreenshotPreferences] =
+    useState(true);
+  const [savingScreenshotPreferences, setSavingScreenshotPreferences] = useState(false);
+  const [screenshotPreferencesError, setScreenshotPreferencesError] = useState<
+    string | null
+  >(null);
   const savedOpacityRef = useRef(DEFAULT_WINDOW_OPACITY);
+  const setScreenshotTargetKind = useScreenAssistanceStore(
+    (state) => state.setTargetKind,
+  );
 
   useEffect(() => {
     let active = true;
@@ -485,6 +505,49 @@ function CustomizationSettings() {
       document.documentElement.dataset.appOpacity = String(savedOpacityRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getScreenshotPreferences()
+      .then((preferences) => {
+        if (active) {
+          setScreenshotPreferencesState(preferences);
+          setScreenshotTargetKind(preferences.targetKind);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setScreenshotPreferencesError("Screenshot settings could not be loaded");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingScreenshotPreferences(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [setScreenshotTargetKind]);
+
+  async function updateScreenshotPreferences(
+    preferences: ScreenshotPreferences,
+  ): Promise<void> {
+    const previous = screenshotPreferences;
+    setScreenshotPreferencesState(preferences);
+    setScreenshotPreferencesError(null);
+    setSavingScreenshotPreferences(true);
+    try {
+      const saved = await setScreenshotPreferences(preferences);
+      setScreenshotPreferencesState(saved);
+      setScreenshotTargetKind(saved.targetKind);
+    } catch {
+      setScreenshotPreferencesState(previous);
+      setScreenshotPreferencesError("Screenshot settings could not be saved");
+    } finally {
+      setSavingScreenshotPreferences(false);
+    }
+  }
 
   async function saveOpacity(): Promise<void> {
     setSavingOpacity(true);
@@ -555,6 +618,60 @@ function CustomizationSettings() {
             {savingOpacity ? "Saving…" : "Save appearance"}
           </button>
         </footer>
+      </section>
+      <section className="customization-card" aria-labelledby="screenshot-heading">
+        <div>
+          <h3 id="screenshot-heading">Screenshot capture</h3>
+          <p className="settings-description">
+            Choose the source used by the screenshot bind and chat capture button.
+          </p>
+        </div>
+        <label className="audio-device-control">
+          Capture source
+          <select
+            aria-label="Screenshot capture source"
+            value={screenshotPreferences.targetKind}
+            disabled={loadingScreenshotPreferences || savingScreenshotPreferences}
+            onChange={(event) => {
+              if (
+                event.currentTarget.value === "monitor" ||
+                event.currentTarget.value === "window"
+              ) {
+                void updateScreenshotPreferences({
+                  ...screenshotPreferences,
+                  targetKind: event.currentTarget.value,
+                });
+              }
+            }}
+          >
+            <option value="monitor">Entire screen</option>
+            <option value="window">Window under pointer</option>
+          </select>
+        </label>
+        <label className="screenshot-close-control">
+          <input
+            type="checkbox"
+            checked={screenshotPreferences.closeWindowOnScreenshot}
+            disabled={loadingScreenshotPreferences || savingScreenshotPreferences}
+            onChange={(event) => {
+              void updateScreenshotPreferences({
+                ...screenshotPreferences,
+                closeWindowOnScreenshot: event.currentTarget.checked,
+              });
+            }}
+          />
+          <span>Close window on screenshot</span>
+        </label>
+        <p className="settings-status" role="status">
+          {savingScreenshotPreferences
+            ? "Saving screenshot settings…"
+            : "Screenshot settings are saved automatically."}
+        </p>
+        {screenshotPreferencesError !== null ? (
+          <p className="settings-error" role="alert">
+            {screenshotPreferencesError}
+          </p>
+        ) : null}
       </section>
     </div>
   );

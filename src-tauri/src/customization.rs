@@ -7,7 +7,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
-const CONFIG_VERSION: u32 = 1;
+use crate::capture::CaptureTargetKind;
+
+const CONFIG_VERSION: u32 = 2;
 pub const DEFAULT_WINDOW_OPACITY: u8 = 100;
 
 #[derive(Clone)]
@@ -20,6 +22,17 @@ pub struct CustomizationService {
 struct CustomizationConfig {
     version: u32,
     window_opacity: u8,
+    #[serde(default)]
+    close_window_on_screenshot: bool,
+    #[serde(default = "default_capture_target_kind")]
+    screenshot_target_kind: CaptureTargetKind,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScreenshotPreferences {
+    pub close_window_on_screenshot: bool,
+    pub target_kind: CaptureTargetKind,
 }
 
 impl CustomizationService {
@@ -41,24 +54,7 @@ impl CustomizationService {
     ///
     /// Returns an error when an existing settings file is inaccessible or invalid.
     pub fn window_opacity(&self) -> Result<u8, String> {
-        let Some(path) = &self.path else {
-            return Ok(DEFAULT_WINDOW_OPACITY);
-        };
-        let contents = match fs::read(path) {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(DEFAULT_WINDOW_OPACITY);
-            }
-            Err(_) => return Err("Customization settings could not be read".to_owned()),
-        };
-        let config: CustomizationConfig = serde_json::from_slice(&contents)
-            .map_err(|_| "Customization settings are invalid".to_owned())?;
-        if config.version != CONFIG_VERSION
-            || validate_window_opacity(config.window_opacity).is_err()
-        {
-            return Err("Customization settings are invalid".to_owned());
-        }
-        Ok(config.window_opacity)
+        Ok(self.load_config()?.window_opacity)
     }
 
     /// Atomically stores a supported app-window opacity value.
@@ -68,19 +64,83 @@ impl CustomizationService {
     /// Returns an error when the value is unsupported or the settings file cannot be saved.
     pub fn set_window_opacity(&self, opacity: u8) -> Result<u8, String> {
         validate_window_opacity(opacity)?;
+        let mut config = self.load_config()?;
+        config.window_opacity = opacity;
+        self.save_config(config)?;
+        Ok(opacity)
+    }
+
+    /// Reads screenshot lifecycle and capture-target preferences.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an existing settings file is inaccessible or invalid.
+    pub fn screenshot_preferences(&self) -> Result<ScreenshotPreferences, String> {
+        let config = self.load_config()?;
+        Ok(ScreenshotPreferences {
+            close_window_on_screenshot: config.close_window_on_screenshot,
+            target_kind: config.screenshot_target_kind,
+        })
+    }
+
+    /// Saves screenshot capture preferences while preserving the other customization values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the settings file cannot be read or saved.
+    pub fn set_screenshot_preferences(
+        &self,
+        preferences: ScreenshotPreferences,
+    ) -> Result<ScreenshotPreferences, String> {
+        let mut config = self.load_config()?;
+        config.close_window_on_screenshot = preferences.close_window_on_screenshot;
+        config.screenshot_target_kind = preferences.target_kind;
+        self.save_config(config)?;
+        Ok(preferences)
+    }
+
+    fn load_config(&self) -> Result<CustomizationConfig, String> {
+        let Some(path) = &self.path else {
+            return Ok(default_config());
+        };
+        let contents = match fs::read(path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(default_config()),
+            Err(_) => return Err("Customization settings could not be read".to_owned()),
+        };
+        let config: CustomizationConfig = serde_json::from_slice(&contents)
+            .map_err(|_| "Customization settings are invalid".to_owned())?;
+        if !matches!(config.version, 1 | CONFIG_VERSION)
+            || validate_window_opacity(config.window_opacity).is_err()
+        {
+            return Err("Customization settings are invalid".to_owned());
+        }
+        Ok(config)
+    }
+
+    fn save_config(&self, mut config: CustomizationConfig) -> Result<(), String> {
         let Some(path) = &self.path else {
             return Err("The application settings directory is unavailable".to_owned());
         };
-        let config = CustomizationConfig {
-            version: CONFIG_VERSION,
-            window_opacity: opacity,
-        };
+        config.version = CONFIG_VERSION;
         let contents = serde_json::to_vec(&config)
             .map_err(|_| "Customization settings could not be saved".to_owned())?;
         replace_atomically(path, &contents)
-            .map_err(|_| "Customization settings could not be saved".to_owned())?;
-        Ok(opacity)
+            .map_err(|_| "Customization settings could not be saved".to_owned())
     }
+}
+
+fn default_config() -> CustomizationConfig {
+    CustomizationConfig {
+        version: CONFIG_VERSION,
+        window_opacity: DEFAULT_WINDOW_OPACITY,
+        close_window_on_screenshot: false,
+        screenshot_target_kind: default_capture_target_kind(),
+    }
+}
+
+fn default_capture_target_kind() -> CaptureTargetKind {
+    CaptureTargetKind::Monitor
 }
 
 fn validate_window_opacity(opacity: u8) -> Result<(), String> {

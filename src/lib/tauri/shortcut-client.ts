@@ -11,7 +11,8 @@ export type ShortcutAction =
   | "screenshot_send"
   | "toggle_taskbar_icon"
   | "voice_input"
-  | "quick_send";
+  | "quick_send"
+  | "min_mode";
 
 export interface ShortcutChord {
   readonly modifiers: readonly ShortcutModifier[];
@@ -142,7 +143,8 @@ function isShortcutBinding(value: unknown): value is ShortcutBinding {
       value.action === "screenshot_send" ||
       value.action === "toggle_taskbar_icon" ||
       value.action === "voice_input" ||
-      value.action === "quick_send") &&
+      value.action === "quick_send" ||
+      value.action === "min_mode") &&
     (value.chord === null || isShortcutChord(value.chord))
   );
 }
@@ -158,6 +160,14 @@ export async function subscribeScreenshotSend(
 ): Promise<() => void> {
   return listen<unknown>("singularity:screenshot-send", () => {
     onScreenshotSend();
+  });
+}
+
+export async function subscribeMinModeToggle(
+  onToggle: () => void,
+): Promise<() => void> {
+  return listen<unknown>("singularity:min-mode-toggle", () => {
+    onToggle();
   });
 }
 

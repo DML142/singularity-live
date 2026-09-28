@@ -79,6 +79,14 @@ export async function startScreenCapture(
   return preview;
 }
 
+export async function captureScreenFromUi(): Promise<void> {
+  await invoke("capture_screen_from_ui");
+}
+
+export async function cancelUiScreenCapture(): Promise<void> {
+  await invoke("cancel_ui_screen_capture");
+}
+
 export async function cancelScreenCapture(operationId: string): Promise<void> {
   if (!isUuid(operationId)) {
     throw new Error("Invalid capture operation identifier");
@@ -114,10 +122,13 @@ export async function discardScreenCapture(captureId: string): Promise<void> {
   await invoke("discard_screen_capture", { request: { captureId } });
 }
 
-export async function startScreenshotAssistance(captureId: string): Promise<string> {
+export async function startScreenshotAssistance(
+  captureId: string,
+  text: string,
+): Promise<string> {
   assertCaptureId(captureId);
   const response = await invoke<unknown>("start_screenshot_assistance", {
-    request: { captureId },
+    request: { captureId, text },
   });
   if (
     !isRecord(response) ||
