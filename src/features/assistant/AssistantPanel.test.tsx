@@ -38,11 +38,15 @@ vi.mock("../../lib/tauri/screen-assistance-client", () => ({
   discardScreenCapture: client.screenDiscard,
   getScreenCaptureCapabilities: client.screenCapabilities,
   listScreenCaptureTargets: client.screenTargets,
+  captureScreenFromUi: client.screenCapture,
+  cancelUiScreenCapture: client.screenCancel,
   newCaptureOperationId: () => "00000000-0000-4000-8000-000000000001",
   screenCaptureErrorMessage: (error: { code?: string }) =>
     error.code === "permissionDenied"
       ? "Screen capture permission was denied"
-      : "Capture failed",
+      : error.code === "cancelled"
+        ? "Screenshot capture cancelled"
+        : "Capture failed",
   startScreenCapture: client.screenCapture,
   startScreenshotAssistance: client.screenshotSend,
 }));
@@ -98,7 +102,7 @@ describe("manual assistant panel", () => {
     client.screenTargets.mockResolvedValue([
       { id: "monitor:1", label: "Display 1", kind: "monitor" },
     ]);
-    client.screenCapture.mockResolvedValue(screenshot);
+    client.screenCapture.mockResolvedValue(undefined);
     client.screenCancel.mockResolvedValue(undefined);
     client.screenCrop.mockResolvedValue(screenshot);
     client.screenDiscard.mockResolvedValue(undefined);
@@ -147,12 +151,12 @@ describe("manual assistant panel", () => {
 
   it("focuses screen help when launched with the screenshot task preset", async () => {
     render(<AssistantPanel initialTask="screenshot" />);
-    const screenAssistance = await screen.findByRole("region", {
-      name: "Screen assistance",
+    const screenshotButton = await screen.findByRole("button", {
+      name: "Screenshot · Screen",
     });
 
     await waitFor(() => {
-      expect(document.activeElement).toBe(screenAssistance);
+      expect(document.activeElement).toBe(screenshotButton);
     });
   });
 
@@ -271,6 +275,7 @@ describe("manual assistant panel", () => {
         {
           id: 1,
           prompt: "Explain this code",
+          screenshotDataUrl: null,
           answer: "Here is the explanation",
           phase: "completed",
           error: null,
@@ -278,7 +283,7 @@ describe("manual assistant panel", () => {
       ],
     });
     render(<AssistantPanel />);
-    await screen.findByRole("button", { name: "Choose source" });
+    await screen.findByRole("button", { name: "Screenshot · Screen" });
     useScreenAssistanceStore.setState({ phase: "preview", preview: screenshot });
     await waitFor(() => {
       expect(client.subscribeScreenshotSend).toHaveBeenCalled();
@@ -293,7 +298,10 @@ describe("manual assistant panel", () => {
     });
 
     await waitFor(() => {
-      expect(client.screenshotSend).toHaveBeenCalledWith(screenshot.captureId);
+      expect(client.screenshotSend).toHaveBeenCalledWith(
+        screenshot.captureId,
+        "Describe this screenshot.",
+      );
     });
   });
 
@@ -608,90 +616,85 @@ describe("manual assistant panel", () => {
     expect(screen.queryByText("sensitive provider detail")).not.toBeInTheDocument();
   });
 
-  it("captures only after the user chooses a source and sends the reviewed preview", async () => {
-    client.start.mockResolvedValueOnce("request-context");
+  it("captures into the conversation and sends the context prefix with a screenshot note", async () => {
     render(<AssistantPanel />);
     const composer = await screen.findByRole("textbox", { name: "Ask for assistance" });
-    fireEvent.change(composer, { target: { value: "What does this Rust code do?" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    fireEvent.change(composer, { target: { value: "What is in this image?" } });
+    const captureButton = screen.getByRole("button", { name: "Screenshot · Screen" });
     await waitFor(() => {
-      expect(client.start).toHaveBeenCalledTimes(1);
+      expect(captureButton).toBeEnabled();
     });
-    await act(async () => {
-      receiveEvent?.({ type: "started", requestId: "request-context" });
-      receiveEvent?.({
-        type: "textDelta",
-        requestId: "request-context",
-        delta: "Send the code and I can explain it.",
-      });
-      receiveEvent?.({
-        type: "completed",
-        requestId: "request-context",
-        provider: "open_router",
-        model: "openrouter/free",
-        usage: null,
-      });
-      await Promise.resolve();
+    fireEvent.click(captureButton);
+    await waitFor(() => {
+      expect(client.screenCapture).toHaveBeenCalledTimes(1);
     });
-    await screen.findByRole("button", { name: "Choose source" });
-
-    expect(client.screenCapture).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
-    await screen.findByRole("button", { name: "Capture screen" });
-    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
+    act(() => {
+      useScreenAssistanceStore.getState().acceptHotkeyCapture({
+        status: "preview",
+        preview: screenshot,
+      });
+    });
 
     expect(
-      await screen.findByRole("img", { name: /Temporary screenshot preview/ }),
+      await screen.findByRole("img", { name: /Temporary screenshot/ }),
     ).toBeInTheDocument();
-    expect(client.screenCapture).toHaveBeenCalledWith(
-      "monitor:1",
-      "00000000-0000-4000-8000-000000000001",
-    );
-    expect(client.screenshotSend).not.toHaveBeenCalled();
+    expect(screen.getByText("explain:")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Send screenshot" }));
     await waitFor(() => {
-      expect(client.screenshotSend).toHaveBeenCalledWith(screenshot.captureId);
+      expect(client.screenshotSend).toHaveBeenCalledWith(
+        screenshot.captureId,
+        "explain: What is in this image?",
+      );
     });
-    await screen.findByText("Screenshot sent with the previous text request");
     expect(
-      screen.queryByRole("img", { name: /Temporary screenshot preview/ }),
+      screen.queryByRole("img", { name: /Temporary screenshot/ }),
     ).not.toBeInTheDocument();
     expect(useManualAssistanceStore.getState().turns.at(-1)?.prompt).toBe(
-      "Continue answering the previous request using the attached screenshot.",
+      "explain: What is in this image?",
     );
-  });
-
-  it("explains when the selected source type has no available targets", async () => {
-    client.screenTargets.mockResolvedValueOnce([]);
-    render(<AssistantPanel />);
-    await screen.findByRole("button", { name: "Choose source" });
-    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
-
-    expect(
-      await screen.findByText(/No screens are available for capture/),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Capture screen" })).toBeNull();
   });
 
   it("discards preview pixels and releases them when the panel unmounts", async () => {
     const { unmount } = render(<AssistantPanel />);
-    await screen.findByRole("button", { name: "Choose source" });
-    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
-    await screen.findByRole("button", { name: "Capture screen" });
-    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
-    await screen.findByRole("img", { name: /Temporary screenshot preview/ });
+    const captureButton = await screen.findByRole("button", {
+      name: "Screenshot · Screen",
+    });
+    await waitFor(() => {
+      expect(captureButton).toBeEnabled();
+    });
+    fireEvent.click(captureButton);
+    await waitFor(() => {
+      expect(client.screenCapture).toHaveBeenCalledTimes(1);
+    });
+    act(() => {
+      useScreenAssistanceStore.getState().acceptHotkeyCapture({
+        status: "preview",
+        preview: screenshot,
+      });
+    });
+    await screen.findByRole("img", { name: /Temporary screenshot/ });
 
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     await waitFor(() => {
       expect(client.screenDiscard).toHaveBeenCalledWith(screenshot.captureId);
     });
     expect(
-      screen.queryByRole("img", { name: /Temporary screenshot preview/ }),
+      screen.queryByRole("img", { name: /Temporary screenshot/ }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
-    await screen.findByRole("img", { name: /Temporary screenshot preview/ });
+    fireEvent.click(screen.getByRole("button", { name: "Screenshot · Screen" }));
+    await waitFor(() => {
+      expect(client.screenCapture).toHaveBeenCalledTimes(2);
+    });
+    act(() => {
+      useScreenAssistanceStore.getState().acceptHotkeyCapture({
+        status: "preview",
+        preview: screenshot,
+      });
+    });
+    await screen.findByRole("img", { name: /Temporary screenshot/ });
     unmount();
 
     expect(client.screenDiscard).toHaveBeenCalledTimes(2);
@@ -709,6 +712,11 @@ describe("manual assistant panel", () => {
       "Screen capture permission was denied",
     );
     denied.unmount();
+    useScreenAssistanceStore.setState({
+      phase: "loading",
+      capabilities: null,
+      error: null,
+    });
 
     let rejectCapture: ((error: { code: string }) => void) | undefined;
     client.screenCapture.mockReturnValueOnce(
@@ -717,22 +725,26 @@ describe("manual assistant panel", () => {
       }),
     );
     render(<AssistantPanel />);
-    await screen.findByRole("button", { name: "Choose source" });
-    fireEvent.click(screen.getByRole("button", { name: "Choose source" }));
-    await screen.findByRole("button", { name: "Capture screen" });
-    fireEvent.click(screen.getByRole("button", { name: "Capture screen" }));
+    await waitFor(() => {
+      expect(useScreenAssistanceStore.getState().capabilities?.permission).toBe(
+        "user_prompt",
+      );
+    });
+    const captureButton = screen.getByRole("button", {
+      name: "Screenshot · Screen",
+    });
+    expect(captureButton).toBeEnabled();
+    fireEvent.click(captureButton);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel capture" }));
 
-    expect(client.screenCancel).toHaveBeenCalledWith(
-      "00000000-0000-4000-8000-000000000001",
-    );
+    expect(client.screenCancel).toHaveBeenCalledWith();
     await act(async () => {
       rejectCapture?.({ code: "cancelled" });
       await Promise.resolve();
     });
     expect(await screen.findByText("Screenshot capture cancelled")).toBeInTheDocument();
     expect(
-      screen.queryByRole("img", { name: /Temporary screenshot preview/ }),
+      screen.queryByRole("img", { name: /Temporary screenshot/ }),
     ).not.toBeInTheDocument();
   });
 });

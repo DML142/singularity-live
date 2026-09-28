@@ -101,6 +101,22 @@ impl ScreenCaptureService {
         operation_id: CaptureOperationId,
         cancellation: CancellationToken,
     ) -> Result<CapturePreview, CaptureError> {
+        self.capture_target_under_pointer(CaptureTargetKind::Monitor, operation_id, cancellation)
+            .await
+    }
+
+    /// Captures the screen or window under the pointer for an explicit native action.
+    ///
+    /// # Errors
+    ///
+    /// Returns a capability, permission, target, preparation, availability, or cancellation
+    /// error. A failed capture leaves no current image in the transient store.
+    pub async fn capture_target_under_pointer(
+        &self,
+        kind: CaptureTargetKind,
+        operation_id: CaptureOperationId,
+        cancellation: CancellationToken,
+    ) -> Result<CapturePreview, CaptureError> {
         let cancellation = self.begin_capture_with_token(operation_id, cancellation)?;
         self.images.clear();
         let mut result = if cancellation.is_cancelled() {
@@ -109,7 +125,7 @@ impl ScreenCaptureService {
                 "Screen capture was cancelled",
             ))
         } else {
-            match self.backend.monitor_under_cursor().await {
+            match self.backend.target_under_pointer(kind).await {
                 Ok(target) => self.capture_target(&target, cancellation.clone()).await,
                 Err(error) => Err(error),
             }

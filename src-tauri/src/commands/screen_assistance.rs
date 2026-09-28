@@ -9,6 +9,7 @@ use crate::{
         CaptureCapabilities, CaptureError, CaptureErrorKind, CaptureId, CaptureOperationId,
         CapturePreview, CaptureTarget, CaptureTargetKind, CropRect, ScreenCaptureService,
     },
+    shortcuts::capture_coordinator::HotkeyCaptureCoordinator,
 };
 
 use super::manual_assistance::TauriEventSink;
@@ -49,6 +50,7 @@ pub struct CropScreenCapturePayload {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartScreenshotAssistancePayload {
     capture_id: String,
+    text: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -97,6 +99,21 @@ pub async fn start_screen_capture(
         .capture(&request.target_id, operation_id)
         .await
         .map_err(|error| capture_command_error(&error))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub async fn capture_screen_from_ui(
+    coordinator: State<'_, Arc<HotkeyCaptureCoordinator>>,
+) -> Result<(), String> {
+    coordinator.capture_from_hotkey().await;
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+pub fn cancel_ui_screen_capture(coordinator: State<'_, Arc<HotkeyCaptureCoordinator>>) {
+    coordinator.cancel_active();
 }
 
 #[tauri::command]
@@ -166,7 +183,7 @@ pub async fn start_screenshot_assistance(
         .map_err(|error| capture_command_error(&error))?;
     let sink = Arc::new(TauriEventSink::new(app));
     let request_id = session
-        .start_screenshot(image, sink)
+        .start_screenshot_with_prompt(image, &request.text, sink)
         .map_err(|error| manual_assistance_command_error(&error))?;
     tokio::task::yield_now().await;
     Ok(StartScreenshotAssistanceResponse {

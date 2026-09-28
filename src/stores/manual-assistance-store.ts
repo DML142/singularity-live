@@ -28,6 +28,7 @@ type TurnPhase = Exclude<RequestPhase, "idle">;
 interface ManualAssistanceTurn {
   readonly id: number;
   readonly prompt: string;
+  readonly screenshotDataUrl: string | null;
   readonly answer: string;
   readonly phase: TurnPhase;
   readonly error: string | null;
@@ -46,8 +47,20 @@ interface ManualAssistanceState {
   readonly activeTurnId: number | null;
   readonly loadReadiness: () => Promise<void>;
   readonly initialize: () => Promise<() => void>;
-  readonly start: (text: string, screenshotCaptureId?: string) => Promise<boolean>;
-  readonly startScreenshot: (captureId: string) => Promise<boolean>;
+  readonly start: (
+    text: string,
+    screenshot?: {
+      readonly captureId: string;
+      readonly dataUrl: string;
+      readonly expiresInSeconds: number;
+    },
+  ) => Promise<boolean>;
+  readonly startScreenshot: (
+    captureId: string,
+    text: string,
+    dataUrl: string,
+    expiresInSeconds: number,
+  ) => Promise<boolean>;
   readonly cancel: () => Promise<void>;
   readonly resetSession: () => Promise<boolean>;
   readonly handleEvent: (event: ManualAssistanceEvent) => void;
@@ -58,6 +71,14 @@ const RETIRED_REQUEST_LIMIT = 32;
 const retiredRequestIds = new Set<string>();
 let bufferedEvents: ManualAssistanceEvent[] = [];
 let nextTurnId = 1;
+const screenshotExpiryTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+function clearScreenshotExpiryTimers(): void {
+  for (const timer of screenshotExpiryTimers.values()) {
+    clearTimeout(timer);
+  }
+  screenshotExpiryTimers.clear();
+}
 
 function updateTurn(
   turns: readonly ManualAssistanceTurn[],
@@ -224,7 +245,7 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
       return () => {};
     }
   },
-  start: async (text, screenshotCaptureId) => {
+  start: async (text, screenshot) => {
     if (
       get().phase === "starting" ||
       get().phase === "streaming" ||
@@ -248,17 +269,33 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
         {
           id: turnId,
           prompt: text,
+          screenshotDataUrl: screenshot?.dataUrl ?? null,
           answer: "",
           phase: "starting",
           error: null,
         },
       ],
     });
+    if (screenshot !== undefined) {
+      const timer = setTimeout(
+        () => {
+          screenshotExpiryTimers.delete(turnId);
+          set((state) => ({
+            turns: updateTurn(state.turns, turnId, (turn) => ({
+              ...turn,
+              screenshotDataUrl: null,
+            })),
+          }));
+        },
+        Math.max(0, screenshot.expiresInSeconds * 1000),
+      );
+      screenshotExpiryTimers.set(turnId, timer);
+    }
     try {
       const requestId =
-        screenshotCaptureId === undefined
+        screenshot === undefined
           ? await startManualAssistance(text)
-          : await startScreenshotAssistance(screenshotCaptureId);
+          : await startScreenshotAssistance(screenshot.captureId, text);
       const state = get();
       if (state.phase === "starting") {
         set({
@@ -308,11 +345,8 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
       return false;
     }
   },
-  startScreenshot: async (captureId) =>
-    get().start(
-      "Continue answering the previous request using the attached screenshot.",
-      captureId,
-    ),
+  startScreenshot: async (captureId, text, dataUrl, expiresInSeconds) =>
+    get().start(text, { captureId, dataUrl, expiresInSeconds }),
   cancel: async () => {
     const state = get();
     if (
@@ -363,6 +397,7 @@ export const useManualAssistanceStore = create<ManualAssistanceState>((set, get)
     }
 
     bufferedEvents = [];
+    clearScreenshotExpiryTimers();
     nextTurnId = 1;
     set({
       phase: "idle",

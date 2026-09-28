@@ -19,8 +19,8 @@ the assistant out of screenshots that Singularity Live captures itself.
 - Treat broadcast capture protection as a core product requirement and a release gate for
   every platform advertised as supported for creator broadcasts.
 - Verify the Windows implementation with both display and window capture in OBS before
-  claiming it works for broadcasts. Keep the separate hide/capture/restore behavior for the
-  application's own screenshot flow.
+  claiming it works for broadcasts. Keep hiding the application during its own screenshot
+  capture optional; the default leaves it visible and relies on content protection.
 - Do not claim equivalent support on Linux, where Tauri's window backend does not implement
   content protection. macOS requires a separate decision about the private API and distribution
   trade-offs, then a dedicated compatibility check.

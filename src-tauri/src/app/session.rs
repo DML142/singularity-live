@@ -170,6 +170,26 @@ impl SessionService {
         )
     }
 
+    /// Starts a screenshot request with text written for the image in the current turn.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error for invalid input, unavailable provider configuration, a busy
+    /// session, or an unavailable event consumer.
+    pub fn start_screenshot_with_prompt(
+        self: &Arc<Self>,
+        image: PreparedImage,
+        text: &str,
+        sink: Arc<dyn StreamSink>,
+    ) -> Result<RequestId, ManualAssistanceError> {
+        let text = if text.trim().is_empty() {
+            "Describe this screenshot.".to_owned()
+        } else {
+            validate_input(text)?
+        };
+        self.start_request(text, Some(image), false, sink)
+    }
+
     fn start_request(
         self: &Arc<Self>,
         text: String,
@@ -241,15 +261,14 @@ impl SessionService {
         }
         let context_pack_root = runtime.context_pack_root.clone();
         let context_pack_directory = runtime.context_pack_directory.clone();
-        let selection_text = content.image.as_ref().map_or_else(
-            || content.text.clone(),
-            |_| {
-                history
-                    .latest_user_intent()
-                    .unwrap_or(&content.text)
-                    .to_owned()
-            },
-        );
+        let selection_text = if content.text == SCREENSHOT_FOLLOW_UP_PROMPT {
+            history
+                .latest_user_intent()
+                .unwrap_or(&content.text)
+                .to_owned()
+        } else {
+            content.text.clone()
+        };
         let context_result = tokio::task::spawn_blocking(move || {
             let pack =
                 ContextPackLoader::load_beneath(&context_pack_root, &context_pack_directory)?;

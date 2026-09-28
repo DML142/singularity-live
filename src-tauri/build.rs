@@ -8,6 +8,8 @@ fn main() {
         "get_screen_capture_capabilities",
         "list_screen_capture_targets",
         "start_screen_capture",
+        "capture_screen_from_ui",
+        "cancel_ui_screen_capture",
         "cancel_screen_capture",
         "crop_screen_capture",
         "discard_screen_capture",
@@ -21,6 +23,8 @@ fn main() {
         "stop_voice_input",
         "get_window_opacity",
         "set_window_opacity",
+        "get_screenshot_preferences",
+        "set_screenshot_preferences",
     ]);
 
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

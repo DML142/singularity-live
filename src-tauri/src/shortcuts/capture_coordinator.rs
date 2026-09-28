@@ -7,7 +7,8 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::capture::{
-    CaptureError, CaptureErrorKind, CaptureOperationId, CapturePreview, ScreenCaptureService,
+    CaptureError, CaptureErrorKind, CaptureOperationId, CapturePreview, CaptureTargetKind,
+    ScreenCaptureService,
 };
 
 pub(crate) trait CaptureWindow: Send + Sync {
@@ -36,6 +37,8 @@ pub(crate) struct HotkeyCaptureCoordinator {
     window: Arc<dyn CaptureWindow>,
     events: Arc<dyn HotkeyCaptureEventSink>,
     manual_request_active: Arc<dyn Fn() -> bool + Send + Sync>,
+    close_window_on_capture: Arc<dyn Fn() -> bool + Send + Sync>,
+    target_kind: Arc<dyn Fn() -> CaptureTargetKind + Send + Sync>,
     active: Mutex<Option<CancellationToken>>,
 }
 
@@ -51,21 +54,28 @@ impl HotkeyCaptureCoordinator {
             window,
             events,
             manual_request_active,
+            close_window_on_capture: Arc::new(|| false),
+            target_kind: Arc::new(|| CaptureTargetKind::Monitor),
             active: Mutex::new(None),
         }
     }
 
+    pub(crate) fn with_capture_preferences(
+        mut self,
+        close_window_on_capture: Arc<dyn Fn() -> bool + Send + Sync>,
+        target_kind: Arc<dyn Fn() -> CaptureTargetKind + Send + Sync>,
+    ) -> Self {
+        self.close_window_on_capture = close_window_on_capture;
+        self.target_kind = target_kind;
+        self
+    }
+
     pub(crate) async fn capture_from_hotkey(&self) {
         if (self.manual_request_active)() {
-            let event = if self.window.restore().is_ok() {
-                error_event(
-                    CaptureErrorKind::Busy,
-                    "A manual assistance request is already in progress",
-                )
-            } else {
-                unavailable_error_event()
-            };
-            self.events.emit(event);
+            self.events.emit(error_event(
+                CaptureErrorKind::Busy,
+                "A manual assistance request is already in progress",
+            ));
             return;
         }
         let cancellation = CancellationToken::new();
@@ -82,17 +92,23 @@ impl HotkeyCaptureCoordinator {
         }
 
         let operation_id = CaptureOperationId::new();
-        let mut result = if self.window.hide().is_err() {
+        let hidden = (self.close_window_on_capture)();
+        let target_kind = (self.target_kind)();
+        let mut result = if hidden && self.window.hide().is_err() {
             Err(unavailable_error())
-        } else {
+        } else if hidden {
             tokio::select! {
                 () = cancellation.cancelled() => Err(cancelled_error()),
                 () = tokio::time::sleep(Duration::from_millis(120)) => {
                     self.captures
-                        .capture_under_cursor(operation_id, cancellation.clone())
+                        .capture_target_under_pointer(target_kind, operation_id, cancellation.clone())
                         .await
                 }
             }
+        } else {
+            self.captures
+                .capture_target_under_pointer(target_kind, operation_id, cancellation.clone())
+                .await
         };
 
         if cancellation.is_cancelled()
@@ -101,7 +117,7 @@ impl HotkeyCaptureCoordinator {
             let _ = self.captures.discard(&preview.capture_id);
             result = Err(cancelled_error());
         }
-        let restore_failed = self.window.restore().is_err();
+        let restore_failed = hidden && self.window.restore().is_err();
         if restore_failed {
             if let Ok(preview) = &result {
                 let _ = self.captures.discard(&preview.capture_id);
@@ -174,10 +190,6 @@ fn error_event(kind: CaptureErrorKind, message: &str) -> HotkeyCaptureEvent {
         kind,
         message: message.to_owned(),
     }
-}
-
-fn unavailable_error_event() -> HotkeyCaptureEvent {
-    error_event(CaptureErrorKind::Unavailable, unavailable_error().message)
 }
 
 const fn unavailable_error() -> CaptureError {
@@ -344,12 +356,15 @@ mod tests {
             summaries: Mutex::new(Vec::new()),
             trace: Some(Arc::clone(&trace)),
         });
-        let coordinator = Arc::new(HotkeyCaptureCoordinator::new(
-            captures,
-            Arc::new(TestWindow(Arc::clone(&trace))),
-            events.clone(),
-            request_active,
-        ));
+        let coordinator = Arc::new(
+            HotkeyCaptureCoordinator::new(
+                captures,
+                Arc::new(TestWindow(Arc::clone(&trace))),
+                events.clone(),
+                request_active,
+            )
+            .with_capture_preferences(Arc::new(|| true), Arc::new(|| CaptureTargetKind::Monitor)),
+        );
         (coordinator, events, trace)
     }
 
@@ -361,10 +376,7 @@ mod tests {
         coordinator.capture_from_hotkey().await;
 
         assert_eq!(trace.capture_calls.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            *trace.steps.lock().expect("trace"),
-            vec!["restore", "event"]
-        );
+        assert_eq!(*trace.steps.lock().expect("trace"), vec!["event"]);
         assert_eq!(
             *events.summaries.lock().expect("summaries"),
             vec![EventSummary::Error(CaptureErrorKind::Busy)]

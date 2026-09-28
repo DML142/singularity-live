@@ -299,6 +299,7 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
                     ShortcutAction::ToggleTaskbarIcon => "Show or hide the taskbar icon",
                     ShortcutAction::VoiceInput => "Toggle voice input",
                     ShortcutAction::QuickSend => "Send the current assistant message",
+                    ShortcutAction::MinMode => "Toggle minimal chat mode",
                 };
                 NewShortcut::new(&request.binding_id, description)
                     .preferred_trigger(Some(request.preferred_trigger.as_str()))

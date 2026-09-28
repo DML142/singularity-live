@@ -56,6 +56,8 @@ pub fn run() {
             commands::application_status::get_app_status,
             commands::customization::get_window_opacity,
             commands::customization::set_window_opacity,
+            commands::customization::get_screenshot_preferences,
+            commands::customization::set_screenshot_preferences,
             commands::manual_assistance::get_manual_assistance_readiness,
             commands::manual_assistance::start_manual_assistance,
             commands::manual_assistance::cancel_manual_assistance,
@@ -63,6 +65,8 @@ pub fn run() {
             commands::screen_assistance::get_screen_capture_capabilities,
             commands::screen_assistance::list_screen_capture_targets,
             commands::screen_assistance::start_screen_capture,
+            commands::screen_assistance::capture_screen_from_ui,
+            commands::screen_assistance::cancel_ui_screen_capture,
             commands::screen_assistance::cancel_screen_capture,
             commands::screen_assistance::crop_screen_capture,
             commands::screen_assistance::discard_screen_capture,
@@ -101,7 +105,7 @@ fn setup_application(
                 ))
             },
         );
-    application.manage(customization);
+    application.manage(Arc::clone(&customization));
     let voice_input = Arc::new(VoiceInputService::new(
         Arc::new(EnvironmentSecretStore),
         Arc::new(TauriVoiceInputEventSink(application.handle().clone())),
@@ -124,14 +128,32 @@ fn setup_application(
     window.set_always_on_top(true)?;
     build_system_tray(application)?;
     let manual_session = Arc::clone(&service);
-    let coordinator = Arc::new(HotkeyCaptureCoordinator::new(
-        captures,
-        Arc::new(TauriCaptureWindow::new(window)),
-        Arc::new(TauriHotkeyCaptureEventSink::new(
-            application.handle().clone(),
-        )),
-        Arc::new(move || manual_session.has_active_request()),
-    ));
+    let close_preferences = Arc::clone(&customization);
+    let target_preferences = Arc::clone(&customization);
+    let coordinator = Arc::new(
+        HotkeyCaptureCoordinator::new(
+            captures,
+            Arc::new(TauriCaptureWindow::new(window)),
+            Arc::new(TauriHotkeyCaptureEventSink::new(
+                application.handle().clone(),
+            )),
+            Arc::new(move || manual_session.has_active_request()),
+        )
+        .with_capture_preferences(
+            Arc::new(move || {
+                close_preferences
+                    .screenshot_preferences()
+                    .is_ok_and(|preferences| preferences.close_window_on_screenshot)
+            }),
+            Arc::new(move || {
+                target_preferences
+                    .screenshot_preferences()
+                    .map_or(capture::CaptureTargetKind::Monitor, |preferences| {
+                        preferences.target_kind
+                    })
+            }),
+        ),
+    );
     application.manage(Arc::clone(&coordinator));
     setup_shortcuts(application, &coordinator, &voice_input);
     Ok(())
@@ -181,6 +203,9 @@ fn setup_shortcuts(
         }
         ShortcutAction::QuickSend => {
             let _ = shortcut_application.emit("singularity:quick-send", ());
+        }
+        ShortcutAction::MinMode => {
+            let _ = shortcut_application.emit("singularity:min-mode-toggle", ());
         }
     });
     let registrar = platform_shortcut_registrar(application.handle().clone(), activation);

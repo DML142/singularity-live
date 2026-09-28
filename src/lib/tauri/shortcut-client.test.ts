@@ -75,8 +75,9 @@ describe("shortcut settings IPC client", () => {
     const actions: readonly ShortcutAction[] = [
       "screenshot_send",
       "toggle_taskbar_icon",
+      "min_mode",
     ];
-    expect(actions).toEqual(["screenshot_send", "toggle_taskbar_icon"]);
+    expect(actions).toEqual(["screenshot_send", "toggle_taskbar_icon", "min_mode"]);
   });
 
   it("displays the platform-equivalent Super key label", () => {

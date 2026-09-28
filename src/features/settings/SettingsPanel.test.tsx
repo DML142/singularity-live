@@ -15,9 +15,29 @@ const { getShortcutBindingsMock, updateShortcutBindingsMock } = vi.hoisted(() =>
       (bindings: readonly ShortcutBinding[]) => Promise<readonly ShortcutBindingView[]>
     >(),
 }));
-const { getWindowOpacityMock, setWindowOpacityMock } = vi.hoisted(() => ({
+const {
+  getWindowOpacityMock,
+  setWindowOpacityMock,
+  getScreenshotPreferencesMock,
+  setScreenshotPreferencesMock,
+} = vi.hoisted(() => ({
   getWindowOpacityMock: vi.fn<() => Promise<number>>(),
   setWindowOpacityMock: vi.fn<(percentage: number) => Promise<number>>(),
+  getScreenshotPreferencesMock: vi.fn<
+    () => Promise<{
+      readonly closeWindowOnScreenshot: boolean;
+      readonly targetKind: "monitor" | "window";
+    }>
+  >(),
+  setScreenshotPreferencesMock: vi.fn<
+    (preferences: {
+      readonly closeWindowOnScreenshot: boolean;
+      readonly targetKind: "monitor" | "window";
+    }) => Promise<{
+      readonly closeWindowOnScreenshot: boolean;
+      readonly targetKind: "monitor" | "window";
+    }>
+  >(),
 }));
 
 vi.mock("../../lib/tauri/shortcut-client", async () => {
@@ -34,6 +54,8 @@ vi.mock("../../lib/tauri/customization-client", () => ({
   DEFAULT_WINDOW_OPACITY: 100,
   getWindowOpacity: getWindowOpacityMock,
   setWindowOpacity: setWindowOpacityMock,
+  getScreenshotPreferences: getScreenshotPreferencesMock,
+  setScreenshotPreferences: setScreenshotPreferencesMock,
 }));
 
 const initialView: ShortcutBindingView = {
@@ -52,9 +74,16 @@ describe("Binds settings", () => {
   beforeEach(() => {
     getShortcutBindingsMock.mockReset().mockResolvedValue([initialView]);
     getWindowOpacityMock.mockReset().mockResolvedValue(100);
+    getScreenshotPreferencesMock.mockReset().mockResolvedValue({
+      closeWindowOnScreenshot: false,
+      targetKind: "monitor",
+    });
     setWindowOpacityMock
       .mockReset()
       .mockImplementation((value) => Promise.resolve(value));
+    setScreenshotPreferencesMock
+      .mockReset()
+      .mockImplementation((preferences) => Promise.resolve(preferences));
     delete document.documentElement.dataset.appOpacity;
     updateShortcutBindingsMock.mockReset().mockImplementation((bindings) =>
       Promise.resolve(

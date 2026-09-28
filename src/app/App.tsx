@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AssistantPanel } from "../features/assistant/AssistantPanel";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
-import { getWindowOpacity } from "../lib/tauri/customization-client";
+import {
+  getScreenshotPreferences,
+  getWindowOpacity,
+} from "../lib/tauri/customization-client";
+import { subscribeMinModeToggle } from "../lib/tauri/shortcut-client";
 import { useApplicationStatusStore } from "../stores/application-status-store";
 import { useScreenAssistanceStore } from "../stores/screen-assistance-store";
 import { listenForHotkeyCapture } from "../lib/tauri/hotkey-capture-client";
@@ -10,6 +14,7 @@ import { useVoiceInputStore } from "../stores/voice-input-store";
 
 export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [minMode, setMinMode] = useState(false);
   const devAssistTask = import.meta.env.VITE_SINGULARITY_LIVE_DEV_ASSIST_TASK;
   const backend = useApplicationStatusStore((state) => state.backend);
   const loadStatus = useApplicationStatusStore((state) => state.loadStatus);
@@ -19,6 +24,9 @@ export function App() {
   const microphoneDeviceId = useVoiceInputStore((state) => state.microphoneDeviceId);
   const acceptHotkeyCapture = useScreenAssistanceStore(
     (state) => state.acceptHotkeyCapture,
+  );
+  const setScreenshotTargetKind = useScreenAssistanceStore(
+    (state) => state.setTargetKind,
   );
   const handleHotkeyCapture = useCallback(
     (event: Parameters<typeof acceptHotkeyCapture>[0]) => {
@@ -57,6 +65,20 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    void getScreenshotPreferences()
+      .then((preferences) => {
+        if (active) {
+          setScreenshotTargetKind(preferences.targetKind);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [setScreenshotTargetKind]);
+
+  useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void initializeVoiceInput().then((stopListening) => {
@@ -90,45 +112,71 @@ export function App() {
     };
   }, [handleHotkeyCapture]);
 
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | undefined;
+    void subscribeMinModeToggle(() => {
+      setMinMode((current) => !current);
+      setSettingsOpen(false);
+    })
+      .then((stopListening) => {
+        if (mounted) {
+          unlisten = stopListening;
+        } else {
+          stopListening();
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, []);
+
   return (
-    <main className="app-shell bg-[var(--color-canvas)] text-[var(--color-text)]">
-      <header className="app-header">
-        <div className="brand-lockup">
-          <span className="signal-mark" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
-          <div>
-            <h1>Singularity Live</h1>
-            <p>Context copilot</p>
+    <main
+      className="app-shell bg-[var(--color-canvas)] text-[var(--color-text)]"
+      data-min-mode={minMode ? "true" : "false"}
+    >
+      {!minMode ? (
+        <header className="app-header">
+          <div className="brand-lockup">
+            <span className="signal-mark" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <div>
+              <h1>Singularity Live</h1>
+              <p>Context copilot</p>
+            </div>
           </div>
-        </div>
-        <div className="header-actions">
-          <div
-            className="backend-status"
-            data-state={backend.phase}
-            role="status"
-            aria-live="polite"
-          >
-            <span aria-hidden="true" />
-            {backend.label}
+          <div className="header-actions">
+            <div
+              className="backend-status"
+              data-state={backend.phase}
+              role="status"
+              aria-live="polite"
+            >
+              <span aria-hidden="true" />
+              {backend.label}
+            </div>
+            <span className="audio-input-status" title={audioInputLabel}>
+              {audioInputLabel}
+            </span>
+            <button
+              className="settings-button"
+              type="button"
+              aria-pressed={settingsOpen}
+              onClick={() => {
+                setSettingsOpen((open) => !open);
+              }}
+            >
+              Settings
+            </button>
           </div>
-          <span className="audio-input-status" title={audioInputLabel}>
-            {audioInputLabel}
-          </span>
-          <button
-            className="settings-button"
-            type="button"
-            aria-pressed={settingsOpen}
-            onClick={() => {
-              setSettingsOpen((open) => !open);
-            }}
-          >
-            Settings
-          </button>
-        </div>
-      </header>
+        </header>
+      ) : null}
 
       <div className="workspace" hidden={settingsOpen} aria-hidden={settingsOpen}>
         <div className="workspace-main">

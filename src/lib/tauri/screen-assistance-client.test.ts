@@ -92,11 +92,13 @@ describe("screen assistance IPC client", () => {
     await cancelScreenCapture(operationId);
     await discardScreenCapture(captureId);
     invokeMock.mockResolvedValueOnce({ requestId: operationId });
-    await expect(startScreenshotAssistance(captureId)).resolves.toBe(operationId);
+    await expect(startScreenshotAssistance(captureId, "explain:")).resolves.toBe(
+      operationId,
+    );
     expect(invokeMock.mock.calls).toEqual([
       ["cancel_screen_capture", { request: { operationId } }],
       ["discard_screen_capture", { request: { captureId } }],
-      ["start_screenshot_assistance", { request: { captureId } }],
+      ["start_screenshot_assistance", { request: { captureId, text: "explain:" } }],
     ]);
   });
 
@@ -110,7 +112,7 @@ describe("screen assistance IPC client", () => {
     await expect(discardScreenCapture("invalid")).rejects.toThrow(
       "Invalid capture identifier",
     );
-    await expect(startScreenshotAssistance("invalid")).rejects.toThrow(
+    await expect(startScreenshotAssistance("invalid", "")).rejects.toThrow(
       "Invalid capture identifier",
     );
     expect(invokeMock).not.toHaveBeenCalled();

@@ -467,6 +467,20 @@ button:focus-visible {
 .assistant-panel > .panel-header {
   flex: 0 0 auto;
 }
+.app-shell[data-min-mode="true"] .app-header,
+.app-shell[data-min-mode="true"] .assistant-panel > .panel-header,
+.app-shell[data-min-mode="true"] .assistant-session-controls {
+  display: none;
+}
+.app-shell[data-min-mode="true"] .workspace-panel {
+  padding: 8px 10px;
+}
+.app-shell[data-min-mode="true"] .assistant-body {
+  padding-top: 0;
+}
+.app-shell[data-min-mode="true"] .assistant-conversation {
+  padding-bottom: 12px;
+}
 .assistant-body {
   display: flex;
   min-height: 0;
@@ -504,6 +518,17 @@ button:focus-visible {
   padding: 8px 10px;
   background: var(--color-canvas);
   color: var(--color-text);
+}
+.screenshot-close-control {
+  display: flex;
+  max-width: 420px;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.screenshot-close-control input {
+  accent-color: var(--color-signal);
 }
 .opacity-control {
   display: grid;
@@ -843,10 +868,23 @@ button:focus-visible {
   display: block;
   width: auto;
   max-width: 100%;
-  max-height: 240px;
+  max-height: min(52vh, 480px);
   height: auto;
   user-select: none;
   cursor: crosshair;
+}
+.chat-screenshot-image {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  margin-top: 9px;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  object-fit: contain;
+}
+.screenshot-inline-status {
+  color: var(--color-ready);
+  font-size: 11px;
 }
 .screen-crop-selection {
   position: absolute;
@@ -865,11 +903,53 @@ button:focus-visible {
   background: #14191c;
   transition: border-color 120ms ease;
 }
+.assistant-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+.assistant-context-action {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: transparent;
+  color: var(--color-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+.assistant-context-action:hover:not(:disabled),
+.assistant-context-action[aria-pressed="true"] {
+  border-color: var(--color-line-strong);
+  background: rgba(105, 210, 231, 0.08);
+  color: var(--color-text);
+}
+.assistant-context-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.assistant-composer-input {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  padding: 0 14px;
+}
+.assistant-context-prefix {
+  flex: 0 0 auto;
+  padding-top: 12px;
+  color: var(--color-dim);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  user-select: none;
+}
 .assistant-composer:focus-within {
   border-color: var(--color-ready);
 }
 .assistant-composer textarea {
   display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   min-height: 56px;
   max-height: 160px;
@@ -877,7 +957,7 @@ button:focus-visible {
   overflow-y: auto;
   border: 0;
   border-radius: 6px 6px 0 0;
-  padding: 12px 14px 7px;
+  padding: 12px 0 7px;
   background: transparent;
   color: var(--color-text);
   font-size: 12px;
