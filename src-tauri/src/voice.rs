@@ -479,7 +479,7 @@ async fn stop_capture_and_drain_audio(
                         *failed = Some("Soniox connection was interrupted".to_owned());
                     }
                     #[cfg(not(target_os = "windows"))]
-                    forward_audio_message(audio, failed);
+                    forward_audio_message(&audio, failed);
                 }
                 None => receiver_closed = true,
             }
@@ -499,7 +499,7 @@ async fn stop_capture_and_drain_audio(
             *failed = Some("Soniox connection was interrupted".to_owned());
         }
         #[cfg(not(target_os = "windows"))]
-        forward_audio_message(audio, failed);
+        forward_audio_message(&audio, failed);
     }
     #[cfg(not(target_os = "windows"))]
     let _ = writer;
