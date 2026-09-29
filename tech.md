@@ -135,6 +135,8 @@ React owns:
   the composer, compact live transcription there, and composer insertion after stop;
 - global quick-send activation that submits the current composer draft while the window is
   minimized without restoring it;
+- a separate global screenshot action that captures the configured screen target and sends
+  it with the current composer draft after capture succeeds;
 - persisted window-opacity and application-scale preferences exposed through Settings →
   Customization;
 - Settings → AI & keys for choosing a provider/model, checking key presence, and revealing
@@ -177,9 +179,11 @@ selection, active microphone enumeration, explicit start/stop, and `get_voice_in
 It also exposes typed `get_shortcut_bindings`, `update_shortcut_bindings`, `get_window_opacity`,
 `set_window_opacity`, `get_app_scale`, `set_app_scale`, `get_screenshot_preferences`, and
 `set_screenshot_preferences` commands. The native shortcut callback dispatches screenshot,
-voice-input, audio-source, click-through, and taskbar-icon actions in Rust and emits minmode,
-quick-send, and screenshot-send events for the
-mounted composer; send actions do not restore a minimized window. A system-tray icon with
+screenshot-and-send, voice-input, audio-source, click-through, and taskbar-icon actions in
+Rust and emits minmode, quick-send, and reviewed-screenshot-send events for the mounted
+composer. Capture-and-send submits the image only after Rust capture succeeds; it uses the
+current composer draft or a default screenshot prompt. Send actions do not restore a
+minimized window. A system-tray icon with
 Show/Hide/Quit keeps the window reachable while hidden; the operating system chooses whether to
 place the icon in the notification area or its overflow. `SessionService` validates text, selects
 relevant static context, composes bounded system and role-tagged conversation messages,
@@ -514,25 +518,28 @@ global shortcuts while the application is running.
 
 **Scope:** Rust-owned shortcut registration and versioned non-secret bind settings; a Binds
 view for recording, clearing, adding, removing, and saving screenshot, screenshot-send,
-taskbar-icon toggle, voice-input toggle, quick-send, and minmode shortcuts; quick send of the
-current composer draft and sending a reviewed screenshot without restoring a minimized window;
-a system-tray Show/Hide/Quit menu; monitor/window-under-pointer capture on native desktops and
-the existing consent-driven source picker on Wayland; optional close-on-capture coordination;
+capture-and-send-screenshot, taskbar-icon toggle, voice-input toggle, quick-send, and minmode
+shortcuts; quick send of the current composer draft and sending a reviewed screenshot without
+restoring a minimized window; a system-tray Show/Hide/Quit menu; monitor/window-under-pointer
+capture on native desktops and the existing consent-driven source picker on Wayland;
+optional close-on-capture coordination;
 and an optional development launcher.
 
 **Out of scope:** OCR, persistent screenshot data, stored API keys, launch-at-login behavior,
-and actions other than Screenshot, Send screenshot, Hide/show taskbar icon, Voice input, Quick
-send, and Minmode.
+and actions other than Screenshot, Send screenshot, Capture and send screenshot, Hide/show
+taskbar icon, Voice input, Quick send, and Minmode.
 
 **Acceptance criteria:** Screenshot, voice toggle, and quick send work while the app is active
 or minimized; quick send uses the current composer draft and leaves the window minimized; the
 capture uses the saved source and optional close-on-capture preference; binding edits validate
 and roll back safely; preview remains temporary and is sent only by explicit user
-action; the dev launcher does not echo or persist credentials; automated tests pass; and manual
-desktop smoke checks pass on supported operating systems.
+action. Capture and send screenshot uses the default `Ctrl+Shift+Enter` binding and submits only
+after a successful explicit capture; the dev launcher does not echo or persist credentials;
+automated tests pass; and manual desktop smoke checks pass on supported operating systems.
 
 **Status:** In progress — earlier shortcut implementation and automated validation are
-recorded. The new minmode and screenshot-composition changes have not yet been validated.
+recorded. The new minmode, screenshot-composition, and capture-and-send shortcut changes have
+not yet been validated against their complete acceptance criteria.
 Manual desktop smoke checks for active/minimized activation, tray restore, quick send while
 minimized, always-on-top restore, capture source/visibility behavior, and platform permission
 flows remain pending.
@@ -681,8 +688,8 @@ shortcuts and compact mode are ordinary visible UX; measurements are reproducibl
 - Rust-only platform capture adapters, bounded image preparation, a five-minute transient
   image store, request-scoped image parts through the provider-neutral router, and OpenRouter
   and Gemini image mappings that preserve text-only request compatibility.
-- Versioned screenshot, screenshot-send, taskbar-icon toggle, voice-input, audio-source toggle,
-  click-through toggle, quick-send, and minmode bindings,
+- Versioned screenshot, screenshot-send, capture-and-send-screenshot, taskbar-icon toggle,
+  voice-input, audio-source toggle, click-through toggle, quick-send, and minmode bindings,
   transactional native shortcut registration and Wayland portal integration,
   monitor/window-under-pointer capture coordination, an always-on-top window lifecycle, system tray,
   and Settings → Binds.
@@ -792,6 +799,25 @@ manual desktop smoke criteria remain outstanding.
 | Tauri development startup                      | Started on Linux Wayland with provider configuration and `OPENROUTER_API_KEY` unset                                                              |
 | Desktop smoke on supported operating systems   | Attempted on Ubuntu 24.04.4 / GNOME 46 Wayland: GlobalShortcuts portal interface is absent, so binds cannot register; Xorg smoke remains pending |
 | Full project `pnpm check`                      | Passed on 2026-09-27: 44 frontend tests, 119 Rust tests, formatting, lint, TypeScript, build, Clippy, and Cargo check                            |
+
+### Screenshot capture-and-send shortcut validation
+
+The new `Capture and send screenshot` action uses the existing Rust capture lifecycle,
+submits only after a successful capture, and defaults to `Ctrl+Shift+Enter`. Existing
+version-5 shortcut settings migrate to version 6 and gain the new action unless its default
+chord conflicts with a saved binding. A Rust event field naming mismatch caused the strict
+frontend parser to reject successful capture events; the field now serializes as
+`sendImmediately`. No automated tests or native desktop/provider smoke checks were run for
+this update.
+
+| Check                           | Result                               |
+| ------------------------------- | ------------------------------------ |
+| Prettier, ESLint, TypeScript    | Passed                               |
+| Frontend production build       | Passed                               |
+| Rust fmt, Clippy, Cargo check   | Passed                               |
+| Windows release executable      | Rebuilt; prior binary backed up      |
+| Automated tests                 | Not run for this update              |
+| Native hotkey and provider send | Not run in the native desktop window |
 
 ### OpenAI and voice input validation record
 

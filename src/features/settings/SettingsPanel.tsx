@@ -327,6 +327,7 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                         if (
                           event.currentTarget.value === "screenshot" ||
                           event.currentTarget.value === "screenshot_send" ||
+                          event.currentTarget.value === "screenshot_capture_send" ||
                           event.currentTarget.value === "toggle_taskbar_icon" ||
                           event.currentTarget.value === "voice_input" ||
                           event.currentTarget.value === "toggle_audio_source" ||
@@ -340,6 +341,9 @@ export function SettingsPanel({ onBack }: SettingsPanelProps) {
                     >
                       <option value="screenshot">Screenshot</option>
                       <option value="screenshot_send">Send screenshot</option>
+                      <option value="screenshot_capture_send">
+                        Capture and send screenshot
+                      </option>
                       <option value="toggle_taskbar_icon">
                         Hide / show taskbar icon
                       </option>

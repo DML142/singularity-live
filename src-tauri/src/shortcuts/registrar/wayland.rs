@@ -296,6 +296,7 @@ impl GlobalShortcutsPortal for AshpdGlobalShortcutsPortal {
                 let description = match request.action {
                     ShortcutAction::Screenshot => "Capture the current screen",
                     ShortcutAction::ScreenshotSend => "Send the captured screenshot",
+                    ShortcutAction::ScreenshotCaptureSend => "Capture and send a screenshot",
                     ShortcutAction::ToggleTaskbarIcon => "Show or hide the taskbar icon",
                     ShortcutAction::VoiceInput => "Toggle voice input",
                     ShortcutAction::ToggleAudioSource => "Switch microphone or system audio",

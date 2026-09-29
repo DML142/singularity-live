@@ -39,6 +39,7 @@ impl ShortcutPlatform {
 pub enum ShortcutAction {
     Screenshot,
     ScreenshotSend,
+    ScreenshotCaptureSend,
     #[serde(alias = "toggle_window")]
     ToggleTaskbarIcon,
     VoiceInput,
@@ -260,6 +261,13 @@ impl ShortcutBindings {
             ShortcutBinding::new(ShortcutAction::ToggleClickThrough, None),
             ShortcutBinding::new(ShortcutAction::QuickSend, None),
             ShortcutBinding::new(ShortcutAction::MinMode, None),
+            ShortcutBinding::new(
+                ShortcutAction::ScreenshotCaptureSend,
+                Some(ShortcutChord {
+                    modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Shift],
+                    key: ShortcutKey("Enter".to_owned()),
+                }),
+            ),
         ]
     }
 }

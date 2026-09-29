@@ -27,9 +27,14 @@ Linux Wayland does not expose the X11 global-shortcut backend used by the Tauri 
 - Persist only a versioned list of shortcut bindings under the application configuration
   directory (falling back to the application data directory). Store no image bytes or
   credentials in this configuration.
-- Provide configurable Screenshot, Send screenshot, and Hide/show taskbar icon actions. The
-  taskbar action changes taskbar visibility while leaving the application window in place. Screenshot
-  send consumes only the current reviewed preview and is a no-op when no preview is ready.
+- Provide configurable Screenshot, Send screenshot, Capture and send screenshot, and
+  Hide/show taskbar icon actions. The taskbar action changes taskbar visibility while leaving
+  the application window in place. Send screenshot consumes only the current reviewed
+  preview and is a no-op when no preview is ready.
+- Capture and send screenshot uses `Ctrl+Shift+Enter` by default. Rust performs the existing
+  capture lifecycle and marks a successful preview for immediate submission; the mounted
+  composer sends it with the current draft or the default screenshot prompt. The ordinary
+  Screenshot action continues to stop at the review preview.
 - Keep a native system-tray icon and Show/Hide/Quit menu available while the window is hidden
   or closed. A left click restores the window; the operating system decides whether the icon
   appears directly in the notification area or in its overflow menu.
@@ -38,7 +43,8 @@ Linux Wayland does not expose the X11 global-shortcut backend used by the Tauri 
 - Screenshot activation rejects overlapping work and uses the saved monitor/window source
   preference. It hides and restores the main window only when the close-on-screenshot setting
   is enabled; this setting is off by default. Capture errors, cancellation, or restore failures
-  clear transient image data and produce safe UI state. Capture never sends automatically.
+  clear transient image data and produce safe UI state. The Screenshot action never sends
+  automatically; Capture and send screenshot is a separate explicit shortcut action.
 - Voice-input activation toggles explicit microphone or system-audio transcription. It never
   submits a transcript to text generation automatically. Quick send only submits the current
   composer draft and is a separate configurable action.
@@ -57,3 +63,11 @@ restores a minimized window. Wayland may require user-visible portal consent and
 requested one. Wayland sessions without a GlobalShortcuts portal cannot
 register binds; users need a supported portal backend or an X11 session. Cross-platform desktop
 smoke checks are required before this roadmap item is marked complete.
+
+## Amendment — explicit screenshot capture and send (2026-09-28)
+
+The creator requested a single explicit shortcut for capturing and immediately submitting a
+screenshot. This is separate from both preview-only Screenshot and Send screenshot, so
+existing bindings keep their behavior. The default is `Ctrl+Shift+Enter`; it uses the same
+Rust-owned capture, cancellation, visibility, and transient-image lifecycle. A successful
+capture is submitted by the mounted composer, and a failed capture is never sent.

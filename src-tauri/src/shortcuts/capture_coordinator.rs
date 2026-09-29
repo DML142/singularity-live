@@ -21,6 +21,8 @@ pub(crate) trait CaptureWindow: Send + Sync {
 pub(crate) enum HotkeyCaptureEvent {
     Preview {
         preview: CapturePreview,
+        #[serde(rename = "sendImmediately", skip_serializing_if = "Option::is_none")]
+        send_immediately: Option<bool>,
     },
     Error {
         kind: CaptureErrorKind,
@@ -71,6 +73,14 @@ impl HotkeyCaptureCoordinator {
     }
 
     pub(crate) async fn capture_from_hotkey(&self) {
+        self.capture_with_send_mode(false).await;
+    }
+
+    pub(crate) async fn capture_and_send_from_hotkey(&self) {
+        self.capture_with_send_mode(true).await;
+    }
+
+    async fn capture_with_send_mode(&self, send_immediately: bool) {
         if (self.manual_request_active)() {
             self.events.emit(error_event(
                 CaptureErrorKind::Busy,
@@ -126,7 +136,10 @@ impl HotkeyCaptureCoordinator {
         }
         *self.active_lock() = None;
         match result {
-            Ok(preview) => self.events.emit(HotkeyCaptureEvent::Preview { preview }),
+            Ok(preview) => self.events.emit(HotkeyCaptureEvent::Preview {
+                preview,
+                send_immediately: send_immediately.then_some(true),
+            }),
             Err(error) => self.events.emit(error_event(error.kind, error.message)),
         }
     }

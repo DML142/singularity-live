@@ -44,6 +44,7 @@ interface ScreenAssistanceState {
   readonly selectedTargetId: string;
   readonly operationId: string | null;
   readonly preview: CapturePreview | null;
+  readonly sendImmediately: boolean;
   readonly error: string | null;
   readonly setTargetKind: (kind: CaptureTargetKind) => void;
   readonly loadCapabilities: () => Promise<void>;
@@ -54,6 +55,7 @@ interface ScreenAssistanceState {
   readonly crop: (rect: CropRect) => Promise<void>;
   readonly discard: () => Promise<void>;
   readonly send: (text: string) => Promise<void>;
+  readonly disableAutomaticSend: (message: string) => void;
   readonly clearForSessionReset: () => void;
   readonly clearOnUnmount: () => Promise<void>;
   readonly acceptHotkeyCapture: (event: HotkeyCaptureEvent) => void;
@@ -88,6 +90,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
   selectedTargetId: "",
   operationId: null,
   preview: null,
+  sendImmediately: false,
   error: null,
   loadCapabilities: async () => {
     set({ phase: "loading", error: null });
@@ -161,6 +164,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
       phase: "capturing",
       operationId: null,
       preview: null,
+      sendImmediately: false,
       error: null,
     });
     try {
@@ -204,6 +208,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
           set({
             phase: "expired",
             preview: null,
+            sendImmediately: false,
             error: "The screenshot expired. Capture it again to continue.",
           });
           void discardScreenCapture(cropped.captureId).catch(() => {});
@@ -216,6 +221,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
         set({
           phase: "expired",
           preview: null,
+          sendImmediately: false,
           error: screenCaptureErrorMessage(error),
         });
       } else {
@@ -229,7 +235,13 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
       return;
     }
     stopExpiryTimer();
-    set({ phase: "discarded", preview: null, operationId: null, error: null });
+    set({
+      phase: "discarded",
+      preview: null,
+      operationId: null,
+      sendImmediately: false,
+      error: null,
+    });
     try {
       await discardScreenCapture(preview.captureId);
     } catch (error) {
@@ -244,7 +256,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
       return;
     }
     stopExpiryTimer();
-    set({ phase: "sending", preview: null, error: null });
+    set({ phase: "sending", preview: null, sendImmediately: false, error: null });
     const prompt = text.trim().length > 0 ? text : "Describe this screenshot.";
     const started = await useManualAssistanceStore
       .getState()
@@ -265,6 +277,9 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
       });
     }
   },
+  disableAutomaticSend: (message) => {
+    set({ sendImmediately: false, error: message });
+  },
   clearForSessionReset: () => {
     stopExpiryTimer();
     set({
@@ -273,6 +288,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
       selectedTargetId: "",
       operationId: null,
       preview: null,
+      sendImmediately: false,
       error: null,
     });
   },
@@ -280,7 +296,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
     const preview = get().preview;
     const captureInProgress = get().phase === "capturing";
     stopExpiryTimer();
-    set({ preview: null, operationId: null, error: null });
+    set({ preview: null, operationId: null, sendImmediately: false, error: null });
     if (captureInProgress) {
       await cancelUiScreenCapture().catch(() => {});
     }
@@ -298,13 +314,20 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
       set({
         phase: event.kind === "cancelled" ? "cancelled" : "failed",
         preview: null,
+        sendImmediately: false,
         operationId: null,
         error: hotkeyCaptureErrorMessage(event.kind),
       });
       return;
     }
     const preview = event.preview;
-    set({ phase: "preview", operationId: null, preview, error: null });
+    set({
+      phase: "preview",
+      operationId: null,
+      preview,
+      sendImmediately: event.sendImmediately === true,
+      error: null,
+    });
     expiryTimer = setTimeout(
       () => {
         if (get().preview?.captureId !== preview.captureId) {
@@ -313,6 +336,7 @@ export const useScreenAssistanceStore = create<ScreenAssistanceState>((set, get)
         set({
           phase: "expired",
           preview: null,
+          sendImmediately: false,
           error: "The screenshot expired. Capture it again to continue.",
         });
         void discardScreenCapture(preview.captureId).catch(() => {});

@@ -226,6 +226,12 @@ fn setup_shortcuts(
                 coordinator.capture_from_hotkey().await;
             });
         }
+        ShortcutAction::ScreenshotCaptureSend => {
+            let coordinator = Arc::clone(&shortcut_coordinator);
+            tauri::async_runtime::spawn(async move {
+                coordinator.capture_and_send_from_hotkey().await;
+            });
+        }
         ShortcutAction::ScreenshotSend => {
             let _ = shortcut_application.emit("singularity:screenshot-send", ());
         }

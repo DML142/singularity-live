@@ -22,7 +22,11 @@ const ERROR_KINDS = [
 export type HotkeyCaptureErrorKind = (typeof ERROR_KINDS)[number];
 
 export type HotkeyCaptureEvent =
-  | { readonly status: "preview"; readonly preview: CapturePreview }
+  | {
+      readonly status: "preview";
+      readonly preview: CapturePreview;
+      readonly sendImmediately?: true;
+    }
   | {
       readonly status: "error";
       readonly kind: HotkeyCaptureErrorKind;
@@ -44,9 +48,22 @@ export function parseHotkeyCaptureEvent(value: unknown): HotkeyCaptureEvent | nu
   if (!isRecord(value) || typeof value.status !== "string") {
     return null;
   }
-  if (value.status === "preview" && hasExactKeys(value, ["status", "preview"])) {
+  const hasSendImmediately = Object.hasOwn(value, "sendImmediately");
+  const previewKeys = hasSendImmediately
+    ? ["status", "preview", "sendImmediately"]
+    : ["status", "preview"];
+  if (
+    value.status === "preview" &&
+    hasExactKeys(value, previewKeys) &&
+    (!hasSendImmediately || typeof value.sendImmediately === "boolean")
+  ) {
     const preview = parseCapturePreview(value.preview);
-    return preview === null ? null : { status: "preview", preview };
+    if (preview === null) {
+      return null;
+    }
+    return value.sendImmediately === true
+      ? { status: "preview", preview, sendImmediately: true }
+      : { status: "preview", preview };
   }
   if (
     value.status === "error" &&

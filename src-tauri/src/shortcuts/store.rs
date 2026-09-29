@@ -14,7 +14,7 @@ use super::{
     validate_bindings,
 };
 
-const CONFIG_VERSION: u32 = 5;
+const CONFIG_VERSION: u32 = 6;
 
 #[derive(Debug, Error)]
 pub enum BindingStoreError {
@@ -120,7 +120,7 @@ impl ShortcutConfigStore {
         validate_bindings(&config.bindings)?;
         match config.version {
             CONFIG_VERSION => Ok(config.bindings),
-            1..=4 => {
+            1..=5 => {
                 let bindings = add_migrated_actions(config.bindings, self.platform);
                 // Migration persistence is best effort: valid prior settings remain usable if
                 // the config directory is temporarily read-only.
@@ -158,12 +158,13 @@ fn add_migrated_actions(
     mut bindings: Vec<ShortcutBinding>,
     platform: ShortcutPlatform,
 ) -> Vec<ShortcutBinding> {
-    for default in ShortcutBindings::defaults(platform)
+    for mut default in ShortcutBindings::defaults(platform)
         .into_iter()
         .filter(|binding| {
             matches!(
                 binding.action,
                 ShortcutAction::ScreenshotSend
+                    | ShortcutAction::ScreenshotCaptureSend
                     | ShortcutAction::ToggleTaskbarIcon
                     | ShortcutAction::MinMode
                     | ShortcutAction::ToggleAudioSource
@@ -175,6 +176,13 @@ fn add_migrated_actions(
             .iter()
             .any(|binding| binding.action == default.action)
         {
+            if default.chord.as_ref().is_some_and(|chord| {
+                bindings
+                    .iter()
+                    .any(|binding| binding.chord.as_ref() == Some(chord))
+            }) {
+                default.chord = None;
+            }
             bindings.push(default);
         }
     }
